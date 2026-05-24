@@ -186,21 +186,23 @@ func printResult(r validator.Result) error {
 		for _, w := range r.Warnings {
 			fmt.Printf("   - %s\n", w)
 		}
+		if strict && len(r.Warnings) > 0 {
+			return fmt.Errorf("validation failed with %d warning(s) in strict mode", len(r.Warnings))
+		}
 	case validator.StatusNonConformant:
 		fmt.Println("❌ non-conformant")
 		for _, e := range r.Errors {
 			fmt.Printf("   - %s\n", e)
 		}
+		errCount := len(r.Errors)
 		if strict && len(r.Warnings) > 0 {
 			fmt.Println("\nWarnings (treated as errors in strict mode):")
 			for _, w := range r.Warnings {
 				fmt.Printf("   - %s\n", w)
 			}
-			return fmt.Errorf("validation failed with %d error(s) and %d warning(s)", len(r.Errors), len(r.Warnings))
+			return fmt.Errorf("validation failed with %d error(s) and %d warning(s)", errCount, len(r.Warnings))
 		}
-		if r.Status == validator.StatusNonConformant {
-			return fmt.Errorf("validation failed with %d error(s)", len(r.Errors))
-		}
+		return fmt.Errorf("validation failed with %d error(s)", errCount)
 	}
 	return nil
 }
