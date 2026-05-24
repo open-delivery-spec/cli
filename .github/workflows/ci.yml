@@ -46,7 +46,7 @@ jobs:
           ./ods validate branch hotfix/critical-memory-leak
           ./ods validate branch release/v1.2.0
           ./ods validate branch chore/update-deps
-          ./ods validate branch feat/add-login  # alias
+          ./ods validate branch feat/add-login
 
       - name: Validate branch naming (trunk branches)
         run: |
@@ -56,30 +56,36 @@ jobs:
 
       - name: Validate branch naming (reject invalid)
         run: |
-          ! ./ods validate branch invalidBranch    # camelCase
-          ! ./ods validate branch feature/NO_CAPS  # underscores
-          ! ./ods validate branch "bugfix/has spaces"  # spaces
-          ! ./ods validate branch "feature/"       # empty description
+          ! ./ods validate branch invalidBranch
+          ! ./ods validate branch feature/NO_CAPS
+          ! ./ods validate branch "bugfix/has spaces"
+          ! ./ods validate branch "feature/"
 
       # -- Commit message --
       - name: Validate commit messages (happy paths)
         run: |
-          echo 'feat(api): add OAuth login
+          ./ods validate commit --stdin <<'MSG'
+          feat(api): add OAuth login
 
-      AI-assisted: false' | ./ods validate commit --stdin
+          AI-assisted: false
+          MSG
 
-          echo 'fix: resolve null pointer crash
+          ./ods validate commit --stdin <<'MSG'
+          fix: resolve null pointer crash
 
-      AI-assisted: true
-      AI-tool: GitHub Copilot
-      AI-review: pending
-      AI-confidence: high' | ./ods validate commit --stdin
+          AI-assisted: true
+          AI-tool: GitHub Copilot
+          AI-review: pending
+          AI-confidence: high
+          MSG
 
       - name: Validate commit messages (breaking change)
         run: |
-          echo 'feat!: drop support for Node 16
+          ./ods validate commit --stdin <<'MSG'
+          feat!: drop support for Node 16
 
-      BREAKING CHANGE: minimum Node version is now 18' | ./ods validate commit --stdin
+          BREAKING CHANGE: minimum Node version is now 18
+          MSG
 
       - name: Validate commit messages (reject empty)
         run: |
@@ -88,34 +94,39 @@ jobs:
       # -- PR description --
       - name: Validate PR descriptions (happy path)
         run: |
-          echo '## Summary
-      Add OAuth login
+          ./ods validate pr --stdin <<'BODY'
+          ## Summary
+          Add OAuth login
 
-      ## Type
-      - [x] Feature
+          ## Type
+          - [x] Feature
 
-      ## AI Disclosure
-      This PR contains AI-generated code
-      AI Tool: GitHub Copilot
+          ## AI Disclosure
+          This PR contains AI-generated code
+          AI Tool: GitHub Copilot
 
-      ## Changes
-      - Added OAuth flow
+          ## Changes
+          - Added OAuth flow
 
-      ## Testing
-      - [x] Unit tests added
+          ## Testing
+          - [x] Unit tests added
 
-      ## Checklist
-      - [x] Branch naming follows ODS' | ./ods validate pr --stdin
+          ## Checklist
+          - [x] Branch naming follows ODS
+          BODY
 
       - name: Validate PR descriptions (missing sections)
         run: |
-          ! echo '## Summary
-      Just this' | ./ods validate pr --stdin
+          ! ./ods validate pr --stdin <<'BODY'
+          ## Summary
+          Just this
+          BODY
 
       # -- Rollback plan --
       - name: Validate rollback plan (happy path)
         run: |
-          echo '{
+          ./ods validate rollback --stdin <<'JSON'
+          {
             "release_id": "v1.2.0",
             "rollback_strategy": "feature_flag",
             "steps": [
@@ -124,7 +135,8 @@ jobs:
             "rollback_indicators": {"error_rate_threshold": ">1%"},
             "data_rollback": {"database_migrations": false},
             "communication_plan": {"notification_template": "Rolling back..."}
-          }' | ./ods validate rollback --stdin
+          }
+          JSON
 
       - name: Validate rollback plan (reject invalid)
         run: |
@@ -134,13 +146,15 @@ jobs:
       # -- Evidence bundle --
       - name: Validate evidence bundle (happy path)
         run: |
-          echo '{
+          ./ods validate evidence --stdin <<'JSON'
+          {
             "bundle_id": "evt-001",
             "release_id": "v1.2.0",
             "environment": "production",
             "deployed_at": "2026-05-24T10:00:00Z",
             "evidence": {}
-          }' | ./ods validate evidence --stdin
+          }
+          JSON
 
       - name: Validate evidence bundle (reject invalid)
         run: |
@@ -149,31 +163,37 @@ jobs:
       # -- Release readiness --
       - name: Validate release readiness (happy path)
         run: |
-          echo '{
+          ./ods validate release --stdin <<'JSON'
+          {
             "release_id": "v1.2.0",
             "target_environment": "production",
             "gates": {"ci": {"passed": true}},
             "overall_score": 95
-          }' | ./ods validate release --stdin
+          }
+          JSON
 
       - name: Validate release readiness (low score warning)
         run: |
-          echo '{
+          ./ods validate release --stdin <<'JSON'
+          {
             "release_id": "v1.2.0",
             "target_environment": "production",
             "gates": {"ci": {"passed": false}},
             "overall_score": 45
-          }' | ./ods validate release --stdin  # should warn
+          }
+          JSON
 
       # -- Approval policy --
       - name: Validate approval policy (happy path)
         run: |
-          echo '{
+          ./ods validate approval-policy --stdin <<'JSON'
+          {
             "policy_id": "default",
             "version": "1.0.0",
             "rules": [{"type": "approval", "min_approvals": 2}],
             "roles": ["tech-lead", "security-reviewer"]
-          }' | ./ods validate approval-policy --stdin
+          }
+          JSON
 
       - name: Validate approval policy (reject empty rules)
         run: |
@@ -182,27 +202,27 @@ jobs:
       # -- Strict mode --
       - name: Strict mode smoke test
         run: |
-          echo 'feat(auth): add login
+          ./ods validate commit --stdin --strict <<'MSG'
+          feat(auth): add login
 
-      AI-assisted: true
-      AI-tool: Copilot
-      AI-review: pending
-      AI-confidence: medium' | ./ods validate commit --stdin --strict
+          AI-assisted: true
+          AI-tool: Copilot
+          AI-review: pending
+          AI-confidence: medium
+          MSG
 
-      # -- Schema sync check: bundled schemas match spec repo --
-      - name: Verify bundled schemas match spec repo
+      # -- Schema sync check --
+      - name: Verify bundled schemas are valid JSON
         run: |
-          ls internal/validator/schemas/ | while read f; do
+          for f in internal/validator/schemas/*.json; do
             echo "  Checking $f..."
-            # Ensure each embedded schema is valid JSON
-            python3 -m json.tool "internal/validator/schemas/$f" > /dev/null
+            python3 -m json.tool "$f" > /dev/null
           done
 
-  # ── Auto-validate our own PR with the GitHub Action ──────────
+  # ── Dogfood with published GitHub Action (disabled until released) ─
   self-validate:
     name: Eat Our Own Dogfood (GitHub Action)
     runs-on: ubuntu-latest
-    # Skip for now — uncomment once github-action is released
     if: false
     steps:
       - uses: actions/checkout@v4
@@ -211,10 +231,10 @@ jobs:
         uses: open-delivery-spec/github-action@v1
         with:
           check: branch-naming
-          branch_name: ${{ github.head_ref }}
+          branch_name: "${{ github.head_ref }}"
 
       - name: Commit message check
         uses: open-delivery-spec/github-action@v1
         with:
           check: commit-message
-          commit_message: ${{ github.event.head_commit.message }}
+          commit_message: "${{ github.event.head_commit.message }}"
