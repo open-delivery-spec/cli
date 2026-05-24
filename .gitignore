@@ -2,5 +2,5 @@
 
 .DS_Store
 dist/
-ods
-ods.exe
+/ods
+/ods.exe
