@@ -1,0 +1,6 @@
+# ODS CLI
+
+.DS_Store
+dist/
+ods
+ods.exe
