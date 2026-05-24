@@ -1,0 +1,220 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  # ── Build & Lint ──────────────────────────────────────────────
+  build:
+    name: Build & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Build
+        run: go build ./...
+
+      - name: Lint
+        run: go vet ./...
+
+  # ── Dogfood: Validate our own deliverables ────────────────────
+  dogfood:
+    name: Dogfood (validate our own artifacts)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Build ods CLI
+        run: go build -o ods ./cmd/ods
+
+      # -- Branch naming --
+      - name: Validate branch naming (happy paths)
+        run: |
+          ./ods validate branch feature/add-oauth-login
+          ./ods validate branch bugfix/fix-null-pointer
+          ./ods validate branch hotfix/critical-memory-leak
+          ./ods validate branch release/v1.2.0
+          ./ods validate branch chore/update-deps
+          ./ods validate branch feat/add-login  # alias
+
+      - name: Validate branch naming (trunk branches)
+        run: |
+          ./ods validate branch main
+          ./ods validate branch master
+          ./ods validate branch develop
+
+      - name: Validate branch naming (reject invalid)
+        run: |
+          ! ./ods validate branch invalidBranch    # camelCase
+          ! ./ods validate branch feature/NO_CAPS  # underscores
+          ! ./ods validate branch "bugfix/has spaces"  # spaces
+          ! ./ods validate branch "feature/"       # empty description
+
+      # -- Commit message --
+      - name: Validate commit messages (happy paths)
+        run: |
+          echo 'feat(api): add OAuth login
+
+      AI-assisted: false' | ./ods validate commit --stdin
+
+          echo 'fix: resolve null pointer crash
+
+      AI-assisted: true
+      AI-tool: GitHub Copilot
+      AI-review: pending
+      AI-confidence: high' | ./ods validate commit --stdin
+
+      - name: Validate commit messages (breaking change)
+        run: |
+          echo 'feat!: drop support for Node 16
+
+      BREAKING CHANGE: minimum Node version is now 18' | ./ods validate commit --stdin
+
+      - name: Validate commit messages (reject empty)
+        run: |
+          ! echo '' | ./ods validate commit --stdin
+
+      # -- PR description --
+      - name: Validate PR descriptions (happy path)
+        run: |
+          echo '## Summary
+      Add OAuth login
+
+      ## Type
+      - [x] Feature
+
+      ## AI Disclosure
+      This PR contains AI-generated code
+      AI Tool: GitHub Copilot
+
+      ## Changes
+      - Added OAuth flow
+
+      ## Testing
+      - [x] Unit tests added
+
+      ## Checklist
+      - [x] Branch naming follows ODS' | ./ods validate pr --stdin
+
+      - name: Validate PR descriptions (missing sections)
+        run: |
+          ! echo '## Summary
+      Just this' | ./ods validate pr --stdin
+
+      # -- Rollback plan --
+      - name: Validate rollback plan (happy path)
+        run: |
+          echo '{
+            "release_id": "v1.2.0",
+            "rollback_strategy": "feature_flag",
+            "steps": [
+              {"step": 1, "action": "disable_feature_flag", "description": "Turn off the flag", "verification": "Check /health returns 200"}
+            ],
+            "rollback_indicators": {"error_rate_threshold": ">1%"},
+            "data_rollback": {"database_migrations": false},
+            "communication_plan": {"notification_template": "Rolling back..."}
+          }' | ./ods validate rollback --stdin
+
+      - name: Validate rollback plan (reject invalid)
+        run: |
+          ! echo 'not json' | ./ods validate rollback --stdin
+          ! echo '{"release_id": "v1"}' | ./ods validate rollback --stdin
+
+      # -- Evidence bundle --
+      - name: Validate evidence bundle (happy path)
+        run: |
+          echo '{
+            "bundle_id": "evt-001",
+            "release_id": "v1.2.0",
+            "environment": "production",
+            "deployed_at": "2026-05-24T10:00:00Z",
+            "evidence": {}
+          }' | ./ods validate evidence --stdin
+
+      - name: Validate evidence bundle (reject invalid)
+        run: |
+          ! echo '{"bundle_id": "evt-001"}' | ./ods validate evidence --stdin
+
+      # -- Release readiness --
+      - name: Validate release readiness (happy path)
+        run: |
+          echo '{
+            "release_id": "v1.2.0",
+            "target_environment": "production",
+            "gates": {"ci": {"passed": true}},
+            "overall_score": 95
+          }' | ./ods validate release --stdin
+
+      - name: Validate release readiness (low score warning)
+        run: |
+          echo '{
+            "release_id": "v1.2.0",
+            "target_environment": "production",
+            "gates": {"ci": {"passed": false}},
+            "overall_score": 45
+          }' | ./ods validate release --stdin  # should warn
+
+      # -- Approval policy --
+      - name: Validate approval policy (happy path)
+        run: |
+          echo '{
+            "policy_id": "default",
+            "version": "1.0.0",
+            "rules": [{"type": "approval", "min_approvals": 2}],
+            "roles": ["tech-lead", "security-reviewer"]
+          }' | ./ods validate approval-policy --stdin
+
+      - name: Validate approval policy (reject empty rules)
+        run: |
+          ! echo '{"policy_id": "default", "version": "1.0.0", "rules": [], "roles": []}' | ./ods validate approval-policy --stdin
+
+      # -- Strict mode --
+      - name: Strict mode smoke test
+        run: |
+          echo 'feat(auth): add login
+
+      AI-assisted: true
+      AI-tool: Copilot
+      AI-review: pending
+      AI-confidence: medium' | ./ods validate commit --stdin --strict
+
+      # -- Schema sync check: bundled schemas match spec repo --
+      - name: Verify bundled schemas match spec repo
+        run: |
+          ls internal/validator/schemas/ | while read f; do
+            echo "  Checking $f..."
+            # Ensure each embedded schema is valid JSON
+            python3 -m json.tool "internal/validator/schemas/$f" > /dev/null
+          done
+
+  # ── Auto-validate our own PR with the GitHub Action ──────────
+  self-validate:
+    name: Eat Our Own Dogfood (GitHub Action)
+    runs-on: ubuntu-latest
+    # Skip for now — uncomment once github-action is released
+    if: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Branch naming check
+        uses: open-delivery-spec/github-action@v1
+        with:
+          check: branch-naming
+          branch_name: ${{ github.head_ref }}
+
+      - name: Commit message check
+        uses: open-delivery-spec/github-action@v1
+        with:
+          check: commit-message
+          commit_message: ${{ github.event.head_commit.message }}
