@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-delivery-spec.dev/schemas/ci-failure.json",
+  "title": "ODS CI Failure Report",
+  "description": "Schema for CI failure reports in the Open Delivery Spec (v1.0.0).",
+  "type": "object",
+  "required": ["pipeline_id", "repository", "branch", "commit", "timestamp", "status", "stages"],
+  "properties": {
+    "pipeline_id": {
+      "type": "string",
+      "description": "Unique pipeline identifier."
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$"
+    },
+    "branch": { "type": "string" },
+    "commit": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{7,40}$"
+    },
+    "trigger": {
+      "type": "string",
+      "enum": ["push", "pull_request", "schedule", "manual", "tag"]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "status": {
+      "type": "string",
+      "const": "failed"
+    },
+    "duration_seconds": {
+      "type": "number",
+      "minimum": 0
+    },
+    "stages": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["status", "duration_seconds"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["passed", "failed", "skipped", "cancelled"]
+          },
+          "duration_seconds": { "type": "number" },
+          "failures": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["test_name", "failure_type", "message"],
+              "properties": {
+                "test_name": { "type": "string" },
+                "test_file": { "type": "string" },
+                "failure_type": {
+                  "type": "string",
+                  "enum": [
+                    "assertion_error", "compilation_error", "type_error",
+                    "lint_error", "security_violation", "timeout",
+                    "dependency_error", "configuration_error",
+                    "integration_error", "unknown"
+                  ]
+                },
+                "message": { "type": "string" },
+                "ai_related": { "type": "boolean", "default": false },
+                "ai_explanation": { "type": "string" },
+                "suggested_fix": { "type": "string" },
+                "stack_trace": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "ai_summary": {
+      "type": "object",
+      "required": ["ai_contributed_stages", "likely_ai_caused", "confidence"],
+      "properties": {
+        "ai_contributed_stages": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "likely_ai_caused": { "type": "boolean" },
+        "confidence": {
+          "type": "string",
+          "enum": ["low", "medium", "high"]
+        },
+        "explanation": { "type": "string" }
+      }
+    },
+    "fix_suggestions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["priority", "action"],
+        "properties": {
+          "priority": { "type": "integer", "minimum": 1 },
+          "file": { "type": "string" },
+          "action": { "type": "string" },
+          "auto_fix_available": { "type": "boolean", "default": false }
+        }
+      }
+    }
+  }
+}

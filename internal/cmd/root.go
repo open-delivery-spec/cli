@@ -1,0 +1,70 @@
+package cmd
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/open-delivery-spec/cli/internal/validator"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
+)
+
+var (
+	cfgFile   string
+	specVer   string
+	strict    bool
+	schemaDir string
+)
+
+var rootCmd = &cobra.Command{
+	Use:   "ods",
+	Short: "Open Delivery Spec CLI",
+	Long: `ods - Open Delivery Spec CLI
+
+A command-line tool for validating, generating, and managing
+delivery artifacts compliant with the Open Delivery Spec.
+
+Validate branch names, commit messages, PR descriptions,
+release readiness reports, rollback plans, and more.`,
+	Version: "1.0.0",
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if schemaDir != "" {
+			return validator.LoadSchemasFromDir(schemaDir)
+		}
+		return validator.LoadEmbeddedSchemas()
+	},
+}
+
+func Execute() error {
+	return rootCmd.Execute()
+}
+
+func init() {
+	cobra.OnInitialize(initConfig)
+
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default .ods.yaml)")
+	rootCmd.PersistentFlags().StringVar(&specVer, "spec-version", "1.0.0", "ODS spec version")
+	rootCmd.PersistentFlags().BoolVar(&strict, "strict", false, "treat warnings as errors")
+	rootCmd.PersistentFlags().StringVar(&schemaDir, "schema-dir", "", "custom schema directory path")
+
+	viper.BindPFlag("spec_version", rootCmd.PersistentFlags().Lookup("spec-version"))
+	viper.BindPFlag("strict", rootCmd.PersistentFlags().Lookup("strict"))
+}
+
+func initConfig() {
+	if cfgFile != "" {
+		viper.SetConfigFile(cfgFile)
+	} else {
+		viper.SetConfigName(".ods")
+		viper.SetConfigType("yaml")
+		viper.AddConfigPath(".")
+		viper.AddConfigPath("$HOME/.config/ods")
+	}
+
+	viper.SetEnvPrefix("ODS")
+	viper.AutomaticEnv()
+
+	if err := viper.ReadInConfig(); err == nil {
+		fmt.Fprintf(os.Stderr, "Using config file: %s\n", viper.ConfigFileUsed())
+	}
+}

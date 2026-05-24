@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-delivery-spec.dev/schemas/branch-naming.json",
+  "title": "ODS Branch Naming",
+  "description": "Schema for validating branch names against the Open Delivery Spec Branch Naming standard (v1.0.0). Extends Conventional Branch 1.0.0.",
+  "type": "object",
+  "required": ["type", "description"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": ["feature", "feat", "bugfix", "fix", "hotfix", "release", "chore"],
+      "description": "Branch type prefix. Aliases (feat, fix) are accepted but canonical names (feature, bugfix) are preferred."
+    },
+    "description": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*(\\.\\d+)*(-[a-z0-9]+)*$",
+      "maxLength": 100,
+      "description": "Branch description in kebab-case. No consecutive hyphens, no leading/trailing hyphens. Dots allowed only for release version segments."
+    },
+    "ticket": {
+      "type": "string",
+      "pattern": "^[A-Z]+-\\d+$",
+      "description": "Optional issue tracker ticket ID (e.g., PROJ-1234)."
+    },
+    "ai_generated": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether this branch was created by an AI agent."
+    },
+    "ai_tool": {
+      "type": "string",
+      "description": "Name of the AI tool that generated this branch (required if ai_generated is true)."
+    },
+    "base_branch": {
+      "type": "string",
+      "enum": ["main", "master", "develop"],
+      "description": "The trunk branch this branch was created from."
+    }
+  },
+  "if": {
+    "properties": { "ai_generated": { "const": true } }
+  },
+  "then": {
+    "required": ["ai_tool"]
+  },
+  "examples": [
+    {
+      "type": "feature",
+      "description": "add-oauth-login",
+      "ticket": "PROJ-1234",
+      "ai_generated": true,
+      "ai_tool": "GitHub Copilot",
+      "base_branch": "main"
+    },
+    {
+      "type": "bugfix",
+      "description": "fix-header-overflow",
+      "ai_generated": false,
+      "base_branch": "main"
+    },
+    {
+      "type": "release",
+      "description": "v1.2.0",
+      "ai_generated": false,
+      "base_branch": "main"
+    }
+  ]
+}

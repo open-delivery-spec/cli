@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-delivery-spec.dev/schemas/pr-description.json",
+  "title": "ODS PR Description",
+  "description": "Schema for validating PR descriptions against the Open Delivery Spec PR Description standard (v1.0.0).",
+  "type": "object",
+  "required": ["summary", "type", "ai_disclosure", "changes", "testing", "checklist"],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 500,
+      "description": "One-sentence description of the PR."
+    },
+    "type": {
+      "type": "object",
+      "required": ["selected"],
+      "properties": {
+        "selected": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": ["feature", "bugfix", "hotfix", "refactor", "documentation", "chore"]
+          }
+        }
+      }
+    },
+    "ai_disclosure": {
+      "type": "object",
+      "required": ["contains_ai_code"],
+      "properties": {
+        "contains_ai_code": {
+          "type": "boolean",
+          "description": "Whether this PR contains AI-generated code."
+        },
+        "ai_tool": {
+          "type": "string",
+          "description": "Name of AI tool(s) used. Required if contains_ai_code is true."
+        },
+        "ai_scope": {
+          "type": "string",
+          "description": "What the AI generated. Required if contains_ai_code is true."
+        },
+        "human_review": {
+          "type": "string",
+          "description": "What the human reviewed or modified. Required if contains_ai_code is true."
+        }
+      },
+      "if": {
+        "properties": { "contains_ai_code": { "const": true } }
+      },
+      "then": {
+        "required": ["ai_tool", "ai_scope", "human_review"]
+      }
+    },
+    "related_issues": {
+      "type": "object",
+      "properties": {
+        "closes": {
+          "type": "array",
+          "items": { "type": "integer" }
+        },
+        "related_to": {
+          "type": "array",
+          "items": { "type": "integer" }
+        }
+      }
+    },
+    "changes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string" },
+      "description": "List of changes in this PR."
+    },
+    "testing": {
+      "type": "object",
+      "required": ["manual_testing"],
+      "properties": {
+        "unit_tests": { "type": "boolean" },
+        "integration_tests": { "type": "boolean" },
+        "manual_testing": { "type": "boolean" },
+        "coverage_before": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "coverage_after": { "type": "integer", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "risk_assessment": {
+      "type": "object",
+      "required": ["deployment_risk"],
+      "properties": {
+        "deployment_risk": {
+          "type": "string",
+          "enum": ["low", "medium", "high"]
+        },
+        "rollback_plan": { "type": "string" },
+        "breaking_change": { "type": "boolean", "default": false }
+      }
+    },
+    "checklist": {
+      "type": "object",
+      "required": ["branch_naming", "commit_messages", "ai_code_reviewed", "no_secrets", "docs_updated"],
+      "properties": {
+        "branch_naming": { "type": "boolean" },
+        "commit_messages": { "type": "boolean" },
+        "ai_code_reviewed": { "type": "boolean" },
+        "no_secrets": { "type": "boolean" },
+        "docs_updated": { "type": "boolean" }
+      }
+    }
+  }
+}

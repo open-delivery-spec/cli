@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-delivery-spec.dev/schemas/prod-release-evidence.json",
+  "title": "ODS Production Release Evidence",
+  "description": "Schema for production release evidence bundles in the Open Delivery Spec (v1.0.0).",
+  "type": "object",
+  "required": [
+    "bundle_id", "release_id", "repository", "environment",
+    "deployed_at", "bundle_generated_at", "bundle_hash", "immutable", "evidence"
+  ],
+  "properties": {
+    "bundle_id": { "type": "string" },
+    "release_id": {
+      "type": "string",
+      "pattern": "^v\\d+\\.\\d+\\.\\d+(-[a-z0-9]+)*$"
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$"
+    },
+    "environment": {
+      "type": "string",
+      "const": "production"
+    },
+    "deployed_at": { "type": "string", "format": "date-time" },
+    "deployed_by": { "type": "string" },
+    "bundle_generated_at": { "type": "string", "format": "date-time" },
+    "bundle_hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "immutable": {
+      "type": "boolean",
+      "const": true
+    },
+    "evidence": {
+      "type": "object",
+      "required": [
+        "release_readiness", "ci_pipeline", "test_results",
+        "security_scan", "approvals", "rollback_plan", "deployment_log"
+      ],
+      "properties": {
+        "release_readiness": {
+          "type": "object",
+          "required": ["score", "all_gates_passed"],
+          "properties": {
+            "report_url": { "type": "string", "format": "uri" },
+            "report_hash": { "type": "string" },
+            "score": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "all_gates_passed": { "type": "boolean" }
+          }
+        },
+        "ci_pipeline": {
+          "type": "object",
+          "required": ["pipeline_id", "status", "all_stages_passed"],
+          "properties": {
+            "pipeline_id": { "type": "string" },
+            "pipeline_url": { "type": "string", "format": "uri" },
+            "status": { "type": "string", "enum": ["passed", "failed"] },
+            "all_stages_passed": { "type": "boolean" },
+            "artifact_hash": { "type": "string" }
+          }
+        },
+        "test_results": {
+          "type": "object",
+          "required": ["total", "passed", "failed"],
+          "properties": {
+            "total": { "type": "integer", "minimum": 0 },
+            "passed": { "type": "integer", "minimum": 0 },
+            "failed": { "type": "integer", "minimum": 0 },
+            "coverage_percentage": { "type": "number", "minimum": 0, "maximum": 100 },
+            "report_url": { "type": "string", "format": "uri" }
+          }
+        },
+        "security_scan": {
+          "type": "object",
+          "required": ["scanner", "critical", "high"],
+          "properties": {
+            "scanner": { "type": "string" },
+            "scan_id": { "type": "string" },
+            "critical": { "type": "integer", "minimum": 0, "const": 0 },
+            "high": { "type": "integer", "minimum": 0, "const": 0 },
+            "report_url": { "type": "string", "format": "uri" }
+          }
+        },
+        "ai_reviews": {
+          "type": "object",
+          "properties": {
+            "total_ai_prs": { "type": "integer" },
+            "all_reviewed": { "type": "boolean" },
+            "review_records": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "pr_number": { "type": "integer" },
+                  "review_level": { "type": "string", "enum": ["L1", "L2", "L3"] },
+                  "outcome": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "approvals": {
+          "type": "object",
+          "required": ["required", "obtained", "approval_records"],
+          "properties": {
+            "required": { "type": "integer" },
+            "obtained": { "type": "integer" },
+            "approval_records": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["approver", "role", "timestamp"],
+                "properties": {
+                  "approver": { "type": "string" },
+                  "role": { "type": "string" },
+                  "timestamp": { "type": "string", "format": "date-time" },
+                  "method": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "rollback_plan": {
+          "type": "object",
+          "required": ["exists"],
+          "properties": {
+            "exists": { "type": "boolean", "const": true },
+            "tested": { "type": "boolean" },
+            "test_passed": { "type": "boolean" },
+            "plan_url": { "type": "string", "format": "uri" },
+            "plan_hash": { "type": "string" }
+          }
+        },
+        "deployment_log": {
+          "type": "object",
+          "required": ["deployment_id", "strategy", "started_at", "completed_at", "health_check_passed"],
+          "properties": {
+            "deployment_id": { "type": "string" },
+            "strategy": { "type": "string" },
+            "started_at": { "type": "string", "format": "date-time" },
+            "completed_at": { "type": "string", "format": "date-time" },
+            "duration_seconds": { "type": "integer" },
+            "instances_updated": { "type": "integer" },
+            "health_check_passed": { "type": "boolean", "const": true },
+            "log_url": { "type": "string", "format": "uri" }
+          }
+        }
+      }
+    },
+    "ai_summary": {
+      "type": "object",
+      "properties": {
+        "total_changes": { "type": "integer" },
+        "ai_contributed": { "type": "integer" },
+        "ai_contribution_pct": { "type": "number" },
+        "highest_review_level": { "type": "string", "enum": ["L1", "L2", "L3"] },
+        "ai_summary": { "type": "string" }
+      }
+    },
+    "signatures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["signed_by", "timestamp", "signature", "verified"],
+        "properties": {
+          "signed_by": { "type": "string" },
+          "timestamp": { "type": "string", "format": "date-time" },
+          "signature": { "type": "string" },
+          "verified": { "type": "boolean", "const": true }
+        }
+      }
+    },
+    "compliance": {
+      "type": "object",
+      "properties": {
+        "frameworks": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "controls_satisfied": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "retention_period_days": { "type": "integer" },
+        "deletion_date": { "type": "string", "format": "date" }
+      }
+    }
+  }
+}

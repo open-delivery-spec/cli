@@ -1,8 +1,13 @@
 package main
 
-import "fmt"
+import (
+	"os"
+
+	"github.com/open-delivery-spec/cli/internal/cmd"
+)
 
 func main() {
-	fmt.Println("ods - Open Delivery Spec CLI")
-	fmt.Println("Coming soon. See https://github.com/open-delivery-spec/cli")
+	if err := cmd.Execute(); err != nil {
+		os.Exit(1)
+	}
 }
