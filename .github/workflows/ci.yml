@@ -228,13 +228,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Branch naming check
-        uses: open-delivery-spec/github-action@v1
+        uses: open-delivery-spec/validate-action@v1
         with:
           check: branch-naming
           branch_name: "${{ github.head_ref }}"
 
       - name: Commit message check
-        uses: open-delivery-spec/github-action@v1
+        uses: open-delivery-spec/validate-action@v1
         with:
           check: commit-message
           commit_message: "${{ github.event.head_commit.message }}"
