@@ -6,7 +6,7 @@
 [![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-> **Status**: M2 active. **M1 production surface**: `ods validate branch|commit|pr`. **M2 Candidate**: `ods ci parse|explain|fix-suggestions` with hallucination detection, `ods review generate|validate|ai-percentage` producing L1/L2/L3 records. Other command groups are experimental and may print placeholder output. See [Roadmap](https://github.com/open-delivery-spec/spec/blob/main/ROADMAP.md) for module maturity.
+> **Status**: Early development. The production-ready M1 surface is `ods validate branch`, `ods validate commit`, and `ods validate pr`. Other validation commands are schema checks for draft modules. Command groups such as `generate`, `release`, `evidence`, `ci`, and `approval` are experimental and may print placeholder output. See [Roadmap](https://github.com/open-delivery-spec/spec/blob/main/ROADMAP.md) for module maturity.
 
 ## Install
 
