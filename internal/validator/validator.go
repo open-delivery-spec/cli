@@ -29,6 +29,13 @@ const (
 	StatusNonConformant      ValidationStatus = "non_conformant"
 )
 
+func finalizeResult(result Result) Result {
+	if result.Status == StatusConformant && len(result.Warnings) > 0 {
+		result.Status = StatusConformantWarnings
+	}
+	return result
+}
+
 // schema cache
 var schemas = map[string]interface{}{}
 
@@ -150,7 +157,7 @@ func ValidateBranch(name string) (Result, error) {
 		}
 	}
 
-	return result, nil
+	return finalizeResult(result), nil
 }
 
 // ValidateCommitMessage validates a commit message string.
@@ -210,7 +217,7 @@ func ValidateCommitMessage(msg string) (Result, error) {
 		}
 	}
 
-	return result, nil
+	return finalizeResult(result), nil
 }
 
 // ValidatePRDescription validates a PR description string.
@@ -233,7 +240,7 @@ func ValidatePRDescription(body string) (Result, error) {
 		}
 	}
 
-	return result, nil
+	return finalizeResult(result), nil
 }
 
 // ValidateRollbackPlan validates a rollback plan JSON.
@@ -271,7 +278,7 @@ func ValidateRollbackPlan(body string) (Result, error) {
 		}
 	}
 
-	return result, nil
+	return finalizeResult(result), nil
 }
 
 // ValidateEvidence validates a production release evidence bundle.
@@ -298,7 +305,7 @@ func ValidateEvidence(body string) (Result, error) {
 		result.Warnings = append(result.Warnings, "evidence bundle environment should be 'production'")
 	}
 
-	return result, nil
+	return finalizeResult(result), nil
 }
 
 // ValidateReleaseReadiness validates a release readiness report JSON.
@@ -327,7 +334,7 @@ func ValidateReleaseReadiness(body string) (Result, error) {
 		}
 	}
 
-	return result, nil
+	return finalizeResult(result), nil
 }
 
 // ValidateAIReview validates an AI change review record against the ODS schema.
@@ -361,7 +368,7 @@ func ValidateAIReview(body string) (Result, error) {
 	// validate outcome
 	if outcome, ok := review["outcome"].(string); ok {
 		validOutcomes := map[string]bool{
-			"approved":             true,
+			"approved":              true,
 			"approved_with_changes": true,
 			"changes_requested":     true,
 			"blocked":               true,
@@ -441,7 +448,7 @@ func ValidateAIReview(body string) (Result, error) {
 		}
 	}
 
-	return result, nil
+	return finalizeResult(result), nil
 }
 
 // ValidateApprovalPolicy validates an approval policy JSON.
@@ -471,5 +478,5 @@ func ValidateApprovalPolicy(body string) (Result, error) {
 		}
 	}
 
-	return result, nil
+	return finalizeResult(result), nil
 }
