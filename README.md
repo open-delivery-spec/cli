@@ -1,12 +1,12 @@
 # ODS CLI
 
-**Reference CLI tool for Open Delivery Spec validation and generation.**
+**Reference CLI tool for Open Delivery Spec validation.**
 
 [![CI](https://github.com/open-delivery-spec/cli/actions/workflows/ci.yml/badge.svg)](https://github.com/open-delivery-spec/cli/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-> **Status**: Early development. `validate` subcommands are functional. Other command groups (`generate`, `review`, `release`, `evidence`, `ci`, `approval`) are stubs that print placeholder output. See [Roadmap](https://github.com/open-delivery-spec/spec/blob/main/ROADMAP.md) for module maturity.
+> **Status**: Early development. The production-ready M1 surface is `ods validate branch`, `ods validate commit`, and `ods validate pr`. Other validation commands are schema checks for draft modules. Command groups such as `generate`, `release`, `evidence`, `ci`, and `approval` are experimental and may print placeholder output. See [Roadmap](https://github.com/open-delivery-spec/spec/blob/main/ROADMAP.md) for module maturity.
 
 ## Install
 
@@ -32,27 +32,35 @@ ods validate pr --file PR_BODY.md
 ods validate branch feat/AI-experiment --strict
 ```
 
-## Stable Commands
+## Stable M1 Commands
 
 ### `ods validate`
 
-Validate delivery artifacts against ODS schemas.
+Validate the L1 delivery artifacts that are ready for CI enforcement.
 
 ```bash
-ods validate branch <name>         # Validate branch name
+ods validate branch <name>              # Validate branch name
 ods validate commit [--file | --stdin]  # Validate commit message
 ods validate pr [--file | --stdin]      # Validate PR description
-ods validate rollback [--file | --stdin]# Validate rollback plan
-ods validate evidence [--file | --stdin]# Validate evidence bundle
-ods validate release [--file | --stdin]# Validate release readiness report
-ods validate approval-policy [--file]   # Validate approval policy
 ```
 
-All validate subcommands support `--strict` to treat warnings as errors.
+All stable validate subcommands support `--strict` to treat warnings as errors.
 
-## Experimental Commands
+## Draft Schema Validation
 
-The following command groups are registered but currently print placeholder output. They will gain real functionality as their corresponding spec modules mature.
+These commands validate JSON files against draft module expectations. They are useful for experimentation, but the corresponding workflows are not production gates yet.
+
+```bash
+ods validate rollback [--file | --stdin]         # Validate rollback plan JSON
+ods validate evidence [--file | --stdin]         # Validate evidence bundle JSON
+ods validate release [--file | --stdin]          # Validate release readiness JSON
+ods validate approval-policy [--file | --stdin]  # Validate approval policy JSON
+ods review validate [--file | --stdin]           # Validate AI review JSON
+```
+
+## Experimental Command Groups
+
+The following command groups are registered but currently include placeholder output. They will gain real functionality as their corresponding spec modules mature.
 
 ### `ods generate`
 ```
