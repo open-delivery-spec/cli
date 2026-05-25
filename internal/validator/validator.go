@@ -330,6 +330,120 @@ func ValidateReleaseReadiness(body string) (Result, error) {
 	return result, nil
 }
 
+// ValidateAIReview validates an AI change review record against the ODS schema.
+func ValidateAIReview(body string) (Result, error) {
+	result := Result{Status: StatusConformant}
+
+	var review map[string]interface{}
+	if err := json.Unmarshal([]byte(body), &review); err != nil {
+		result.Status = StatusNonConformant
+		result.Errors = append(result.Errors, fmt.Sprintf("invalid JSON: %v", err))
+		return result, nil
+	}
+
+	requiredFields := []string{"pr_number", "review_level", "reviewer", "timestamp", "outcome", "checklist_results"}
+	for _, field := range requiredFields {
+		if _, ok := review[field]; !ok {
+			result.Status = StatusNonConformant
+			result.Errors = append(result.Errors, fmt.Sprintf("missing required field: %s", field))
+		}
+	}
+
+	// validate review_level
+	if level, ok := review["review_level"].(string); ok {
+		validLevels := map[string]bool{"L1": true, "L2": true, "L3": true}
+		if !validLevels[level] {
+			result.Status = StatusNonConformant
+			result.Errors = append(result.Errors, fmt.Sprintf("review_level must be L1, L2, or L3. Got: %s", level))
+		}
+	}
+
+	// validate outcome
+	if outcome, ok := review["outcome"].(string); ok {
+		validOutcomes := map[string]bool{
+			"approved":             true,
+			"approved_with_changes": true,
+			"changes_requested":     true,
+			"blocked":               true,
+		}
+		if !validOutcomes[outcome] {
+			result.Status = StatusNonConformant
+			result.Errors = append(result.Errors, fmt.Sprintf("outcome must be one of: approved, approved_with_changes, changes_requested, blocked. Got: %s", outcome))
+		}
+	}
+
+	// validate checklist_results
+	if checklist, ok := review["checklist_results"].(map[string]interface{}); ok {
+		checklistCategories := []string{"correctness", "security", "ai_specific", "quality"}
+		for _, cat := range checklistCategories {
+			item, ok := checklist[cat].(map[string]interface{})
+			if !ok {
+				result.Status = StatusNonConformant
+				result.Errors = append(result.Errors, fmt.Sprintf("checklist_results must contain '%s' object", cat))
+				continue
+			}
+			if _, ok := item["passed"]; !ok {
+				result.Status = StatusNonConformant
+				result.Errors = append(result.Errors, fmt.Sprintf("checklist_results.%s must contain 'passed' field", cat))
+			}
+			if _, ok := item["issues"]; !ok {
+				result.Status = StatusNonConformant
+				result.Errors = append(result.Errors, fmt.Sprintf("checklist_results.%s must contain 'issues' field", cat))
+			}
+		}
+	}
+
+	// L3 requires second_reviewer
+	if level, _ := review["review_level"].(string); level == "L3" {
+		if _, ok := review["second_reviewer"]; !ok {
+			result.Status = StatusNonConformant
+			result.Errors = append(result.Errors, "L3 reviews require a second_reviewer")
+		}
+	}
+
+	// approved_with_changes and changes_requested require human_modifications
+	if outcome, _ := review["outcome"].(string); outcome == "approved_with_changes" || outcome == "changes_requested" {
+		mods, ok := review["human_modifications"]
+		if !ok {
+			result.Status = StatusNonConformant
+			result.Errors = append(result.Errors, "outcome 'approved_with_changes' or 'changes_requested' requires human_modifications list")
+		} else if modsArr, ok := mods.([]interface{}); ok && len(modsArr) == 0 {
+			result.Warnings = append(result.Warnings, "human_modifications list is empty")
+		}
+	}
+
+	// validate issues_found items
+	if issues, ok := review["issues_found"].([]interface{}); ok {
+		for i, issue := range issues {
+			if issueMap, ok := issue.(map[string]interface{}); ok {
+				for _, field := range []string{"category", "severity", "description"} {
+					if _, ok := issueMap[field]; !ok {
+						result.Status = StatusNonConformant
+						result.Errors = append(result.Errors, fmt.Sprintf("issues_found[%d] missing required field: %s", i, field))
+					}
+				}
+				if severity, ok := issueMap["severity"].(string); ok {
+					validSeverities := map[string]bool{"critical": true, "high": true, "medium": true, "low": true, "info": true}
+					if !validSeverities[severity] {
+						result.Status = StatusNonConformant
+						result.Errors = append(result.Errors, fmt.Sprintf("issues_found[%d] severity must be one of: critical, high, medium, low, info. Got: %s", i, severity))
+					}
+				}
+			}
+		}
+	}
+
+	// ai_contribution_percentage range check
+	if pct, ok := review["ai_contribution_percentage"].(float64); ok {
+		if pct < 0 || pct > 100 {
+			result.Status = StatusNonConformant
+			result.Errors = append(result.Errors, "ai_contribution_percentage must be between 0 and 100")
+		}
+	}
+
+	return result, nil
+}
+
 // ValidateApprovalPolicy validates an approval policy JSON.
 func ValidateApprovalPolicy(body string) (Result, error) {
 	result := Result{Status: StatusConformant}

@@ -183,6 +183,51 @@ jobs:
           }
           JSON
 
+      # -- AI review record --
+      - name: Validate AI review record (happy path)
+        run: |
+          ./ods review validate --stdin <<'JSON'
+          {
+            "pr_number": 42,
+            "review_level": "L2",
+            "ai_contribution_percentage": 65,
+            "reviewer": "jane-doe",
+            "timestamp": "2026-05-24T10:00:00Z",
+            "outcome": "approved",
+            "checklist_results": {
+              "correctness": {"passed": true, "issues": 0},
+              "security": {"passed": true, "issues": 0},
+              "ai_specific": {"passed": true, "issues": 1},
+              "quality": {"passed": true, "issues": 0}
+            },
+            "issues_found": [
+              {"category": "ai_specific", "severity": "low", "description": "Hallucinated API parameter"}
+            ]
+          }
+          JSON
+
+      - name: Validate AI review record (L3 missing second_reviewer)
+        run: |
+          ! ./ods review validate --stdin <<'JSON'
+          {
+            "pr_number": 99,
+            "review_level": "L3",
+            "reviewer": "bob",
+            "timestamp": "2026-05-24T10:00:00Z",
+            "outcome": "approved",
+            "checklist_results": {
+              "correctness": {"passed": true, "issues": 0},
+              "security": {"passed": true, "issues": 0},
+              "ai_specific": {"passed": true, "issues": 0},
+              "quality": {"passed": true, "issues": 0}
+            }
+          }
+          JSON
+
+      - name: Validate AI review record (reject invalid JSON)
+        run: |
+          ! echo 'not json' | ./ods review validate --stdin
+
       # -- Approval policy --
       - name: Validate approval policy (happy path)
         run: |

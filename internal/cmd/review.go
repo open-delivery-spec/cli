@@ -3,9 +3,9 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"time"
 
+	"github.com/open-delivery-spec/cli/internal/validator"
 	"github.com/spf13/cobra"
 )
 
@@ -48,16 +48,23 @@ var reviewGenerateCmd = &cobra.Command{
 
 var reviewValidateCmd = &cobra.Command{
 	Use:   "validate",
-	Short: "Validate an AI change review record",
-	Args:  cobra.MaximumNArgs(1),
+	Short: "Validate an AI change review record against ODS schema",
+	Long: `Validate an AI change review JSON record against the ODS AI Change Review schema.
+
+Examples:
+  ods review validate --file review.json
+  cat review.json | ods review validate --stdin`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		body, err := readInput()
 		if err != nil {
+			return fmt.Errorf("reading review record: %w", err)
+		}
+		result, err := validator.ValidateAIReview(body)
+		if err != nil {
 			return err
 		}
-		fmt.Printf("Review record for PR #%s validated.\n", strconv.Itoa(reviewPR))
-		_ = body
-		return nil
+		return printResult(result)
 	},
 }
 
@@ -80,9 +87,10 @@ func init() {
 	reviewCmd.AddCommand(reviewValidateCmd)
 	reviewCmd.AddCommand(reviewAIPctCmd)
 
-	for _, c := range []*cobra.Command{reviewGenerateCmd, reviewValidateCmd, reviewAIPctCmd} {
+	for _, c := range []*cobra.Command{reviewGenerateCmd, reviewAIPctCmd} {
 		c.Flags().IntVarP(&reviewPR, "pr", "p", 0, "PR number")
 	}
 
 	reviewValidateCmd.Flags().StringVarP(&validateFile, "file", "f", "", "review record JSON file")
+	reviewValidateCmd.Flags().BoolVar(&validateStdin, "stdin", false, "read from stdin")
 }
