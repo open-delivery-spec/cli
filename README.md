@@ -58,6 +58,41 @@ ods validate approval-policy [--file | --stdin]  # Validate approval policy JSON
 ods review validate [--file | --stdin]           # Validate AI review JSON
 ```
 
+## Candidate M2 Commands
+
+### `ods review`
+
+Generate and validate AI change review records with L1/L2/L3 level support.
+
+```bash
+# Generate L2 review record
+ods review generate --pr 42 --level L2 --ai-pct 45
+
+# Generate L3 review record (auto-detected from high AI percentage)
+ods review generate --pr 99 --level L3 --ai-pct 92
+
+# Validate a review record
+ods review validate --file review.json
+
+# Estimate AI contribution from commit log
+ods review ai-percentage --pr 42
+```
+
+### `ods ci`
+
+Parse CI failure logs and produce structured reports with AI hallucination detection.
+
+```bash
+# Parse CI log with hallucination detection
+ods ci parse --file ci-output.log --pipeline build-12345 --repo org/my-service
+
+# Explain failures in human-readable form
+ods ci explain --file ci-output.log --pipeline build-12345
+
+# Get prioritized fix suggestions
+ods ci fix-suggestions --file ci-output.log --pipeline build-12345
+```
+
 ## Experimental Command Groups
 
 The following command groups are registered but currently include placeholder output. They will gain real functionality as their corresponding spec modules mature.
@@ -71,13 +106,6 @@ ods generate release --version v1.4.0
 ods generate rollback --version v1.4.0 --strategy feature_flag
 ```
 
-### `ods review`
-```
-ods review generate --pr 42
-ods review validate
-ods review ai-percentage --pr 42
-```
-
 ### `ods release`
 ```
 ods release check --version v1.4.0
@@ -88,12 +116,6 @@ ods release check --version v1.4.0
 ods evidence generate --release v1.4.0 --env production
 ods evidence verify <bundle-file>
 ods evidence audit
-```
-
-### `ods ci`
-```
-ods ci parse --file ci-output.log
-ods ci explain <pipeline-id>
 ```
 
 ### `ods approval`
