@@ -29,6 +29,9 @@ ods validate commit --file commit-msg.txt
 # Validate a PR description
 ods validate pr --file PR_BODY.md
 
+# Generate an HTML/Markdown/JSON/SVG compliance report
+ods report
+
 # Strict mode — treat warnings as errors
 ods validate branch feat/AI-experiment --strict
 ```
@@ -46,6 +49,32 @@ ods validate pr [--file | --stdin]      # Validate PR description
 ```
 
 All stable validate subcommands support `--strict` to treat warnings as errors.
+
+## Compliance Report
+
+Generate an ODS L1 compliance report with convention-first defaults:
+
+```bash
+ods report
+```
+
+The command writes `ods-report/` by default:
+
+```text
+ods-report/
+├── index.html
+├── ods-compliance.json
+├── ods-compliance.svg
+└── ods-summary.md
+```
+
+`ods report` reads GitHub Actions context when available and falls back to local git metadata. PR-only data, such as the PR description, is skipped when it is not available.
+
+Use `--output` only when you need a different report directory:
+
+```bash
+ods report --output build/ods-report
+```
 
 ## Draft Schema Validation
 

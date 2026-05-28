@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/open-delivery-spec/cli/internal/validator"
 	"github.com/spf13/cobra"
@@ -62,6 +63,7 @@ func initConfig() {
 	}
 
 	viper.SetEnvPrefix("ODS")
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()
 
 	if err := viper.ReadInConfig(); err == nil {
