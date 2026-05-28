@@ -28,7 +28,7 @@ reported as skipped instead of requiring extra flags.`,
 		}
 
 		inputs := report.DiscoverInputs()
-		result := report.Build(inputs, report.Options{Strict: strict})
+		result := report.Build(inputs, report.Options{Strict: strict, Check: viper.GetString("report.check")})
 		if err := report.WriteFiles(result, outputDir); err != nil {
 			return fmt.Errorf("writing report: %w", err)
 		}

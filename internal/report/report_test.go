@@ -90,6 +90,24 @@ func TestBuildSkipsMissingContext(t *testing.T) {
 	}
 }
 
+func TestBuildSelectedCheck(t *testing.T) {
+	report := Build(Inputs{
+		BranchName:    "BadBranch",
+		CommitMessage: "feat(auth): add oauth login",
+		PRBody:        validPRBody,
+	}, Options{Check: "commit-message", GeneratedAt: fixedTime()})
+
+	if len(report.Checks) != 1 {
+		t.Fatalf("checks = %d, want 1", len(report.Checks))
+	}
+	if report.Checks[0].ID != "commit-message" {
+		t.Fatalf("check ID = %s, want commit-message", report.Checks[0].ID)
+	}
+	if report.Status != StatusCompliant {
+		t.Fatalf("status = %s, want %s", report.Status, StatusCompliant)
+	}
+}
+
 func TestBuildInvalidReport(t *testing.T) {
 	report := Build(Inputs{
 		BranchName:    "BadBranch",

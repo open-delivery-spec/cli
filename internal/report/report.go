@@ -71,6 +71,7 @@ type Report struct {
 type Options struct {
 	Strict      bool
 	GeneratedAt time.Time
+	Check       string
 }
 
 func DiscoverInputs() Inputs {
@@ -118,14 +119,27 @@ func Build(in Inputs, opts Options) Report {
 		SHA:         in.SHA,
 		PRNumber:    in.PRNumber,
 		BranchName:  in.BranchName,
-		Checks: []Check{
-			validateBranch(in.BranchName, opts.Strict),
-			validateCommit(in.CommitMessage, opts.Strict),
-			validatePR(in.PRBody, opts.Strict),
-		},
+		Checks:      buildChecks(in, opts),
 	}
 	r.Score, r.Status = summarize(r.Checks)
 	return r
+}
+
+func buildChecks(in Inputs, opts Options) []Check {
+	switch opts.Check {
+	case "branch-naming":
+		return []Check{validateBranch(in.BranchName, opts.Strict)}
+	case "commit-message":
+		return []Check{validateCommit(in.CommitMessage, opts.Strict)}
+	case "pr-description":
+		return []Check{validatePR(in.PRBody, opts.Strict)}
+	default:
+		return []Check{
+			validateBranch(in.BranchName, opts.Strict),
+			validateCommit(in.CommitMessage, opts.Strict),
+			validatePR(in.PRBody, opts.Strict),
+		}
+	}
 }
 
 func WriteFiles(r Report, outputDir string) error {
