@@ -92,7 +92,7 @@ jobs:
 
 const odsConfig = `# ODS Compliance Policy Configuration
 # This is the recommended starting configuration.
-# See https://open-delivery-spec.dev for full documentation.
+# See https://open-delivery-spec.github.io/spec for full documentation.
 
 # Profile: oss, enterprise, or regulated
 # - oss: Open-source friendly; AI disclosure optional, relaxed rules
@@ -230,10 +230,10 @@ func initGitHub() error {
 	fmt.Println("  2. Review .github/PULL_REQUEST_TEMPLATE.md — customize sections if needed")
 	fmt.Println("  3. Commit and push — the ODS workflows will run on your next PR")
 	fmt.Println("  4. Optional: add an ODS badge to your README:")
-	fmt.Println("     [![ODS L1](https://img.shields.io/badge/ODS-L1%20Structured%20Delivery-blue)](https://open-delivery-spec.dev)")
+	fmt.Println("     [![ODS L1](https://img.shields.io/badge/ODS-L1%20Structured%20Delivery-blue)](https://github.com/open-delivery-spec/spec)")
 	fmt.Println()
-	fmt.Println("  Docs: https://open-delivery-spec.dev")
-	fmt.Println("  Adoption guide: https://open-delivery-spec.dev/adoption-guide")
+	fmt.Println("  Docs: https://open-delivery-spec.github.io/spec")
+	fmt.Println("  Adoption guide: https://open-delivery-spec.github.io/spec/adoption-guide")
 
 	return nil
 }

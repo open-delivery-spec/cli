@@ -560,7 +560,7 @@ func SARIF(r Report) ([]byte, error) {
 				Driver: sarifDriver{
 					Name:           "ODS CLI",
 					Version:        "1.0.0",
-					InformationURI: "https://open-delivery-spec.dev",
+					InformationURI: "https://open-delivery-spec.github.io/spec",
 					Rules:          buildSARIFRules(),
 				},
 			},
@@ -639,9 +639,9 @@ type sarifVersionControl struct {
 
 func buildSARIFRules() []sarifRule {
 	return []sarifRule{
-		{ID: "ODS01", Name: "BranchNaming", ShortDescription: sarifMessage{Text: "Branch name must follow <type>/<description> format"}, HelpURI: "https://open-delivery-spec.dev/modules/01-branch-naming"},
-		{ID: "ODS02", Name: "CommitMessage", ShortDescription: sarifMessage{Text: "Commit message must follow Conventional Commits with optional AI attribution"}, HelpURI: "https://open-delivery-spec.dev/modules/02-commit-message"},
-		{ID: "ODS03", Name: "PRDescription", ShortDescription: sarifMessage{Text: "PR description must include required sections and AI disclosure"}, HelpURI: "https://open-delivery-spec.dev/modules/03-pr-description"},
+		{ID: "ODS01", Name: "BranchNaming", ShortDescription: sarifMessage{Text: "Branch name must follow <type>/<description> format"}, HelpURI: "https://open-delivery-spec.github.io/spec/modules/01-branch-naming"},
+		{ID: "ODS02", Name: "CommitMessage", ShortDescription: sarifMessage{Text: "Commit message must follow Conventional Commits with optional AI attribution"}, HelpURI: "https://open-delivery-spec.github.io/spec/modules/02-commit-message"},
+		{ID: "ODS03", Name: "PRDescription", ShortDescription: sarifMessage{Text: "PR description must include required sections and AI disclosure"}, HelpURI: "https://open-delivery-spec.github.io/spec/modules/03-pr-description"},
 	}
 }
 

@@ -3,7 +3,7 @@
 **Reference CLI tool for Open Delivery Spec validation.**
 
 [![CI](https://github.com/open-delivery-spec/cli/actions/workflows/ci.yml/badge.svg)](https://github.com/open-delivery-spec/cli/actions/workflows/ci.yml)
-[![ODS L1](https://img.shields.io/badge/ODS-L1%20Structured%20Delivery-blue)](https://open-delivery-spec.dev)
+[![ODS L1](https://img.shields.io/badge/ODS-L1%20Structured%20Delivery-blue)](https://github.com/open-delivery-spec/spec)
 [![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
