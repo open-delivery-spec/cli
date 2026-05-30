@@ -11,10 +11,12 @@ import (
 )
 
 var (
-	cfgFile   string
-	specVer   string
-	strict    bool
-	schemaDir string
+	cfgFile     string
+	specVer     string
+	strict      bool
+	schemaDir   string
+	policyProfile string
+	policyFile  string
 )
 
 var rootCmd = &cobra.Command{
@@ -47,9 +49,13 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&specVer, "spec-version", "1.0.0", "ODS spec version")
 	rootCmd.PersistentFlags().BoolVar(&strict, "strict", false, "treat warnings as errors")
 	rootCmd.PersistentFlags().StringVar(&schemaDir, "schema-dir", "", "custom schema directory path")
+	rootCmd.PersistentFlags().StringVar(&policyProfile, "profile", "", "compliance profile: oss, enterprise, regulated")
+	rootCmd.PersistentFlags().StringVar(&policyFile, "policy", "", "path to policy YAML file")
 
 	viper.BindPFlag("spec_version", rootCmd.PersistentFlags().Lookup("spec-version"))
 	viper.BindPFlag("strict", rootCmd.PersistentFlags().Lookup("strict"))
+	viper.BindPFlag("profile", rootCmd.PersistentFlags().Lookup("profile"))
+	viper.BindPFlag("policy_file", rootCmd.PersistentFlags().Lookup("policy"))
 }
 
 func initConfig() {

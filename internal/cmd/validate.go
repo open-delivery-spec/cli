@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/open-delivery-spec/cli/internal/policy"
 	"github.com/open-delivery-spec/cli/internal/validator"
 	"github.com/spf13/cobra"
 )
@@ -26,11 +27,13 @@ var validateBranchCmd = &cobra.Command{
 
 Examples:
   ods validate branch feature/add-oauth-login
-  ods validate branch bugfix/fix-null-pointer --strict`,
+  ods validate branch bugfix/fix-null-pointer --strict
+  ods validate branch feature/add-oauth --profile enterprise`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		result, err := validator.ValidateBranch(name)
+		p, _ := policy.LoadPolicy()
+		result, err := validator.ValidateBranchWithPolicy(name, p)
 		if err != nil {
 			return err
 		}
@@ -45,13 +48,15 @@ var validateCommitCmd = &cobra.Command{
 
 Examples:
   ods validate commit --file commit-msg.txt
-  git log -1 --format=%B | ods validate commit --stdin`,
+  git log -1 --format=%B | ods validate commit --stdin
+  ods validate commit --file msg.txt --profile regulated`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		msg, err := readInput()
 		if err != nil {
 			return fmt.Errorf("reading commit message: %w", err)
 		}
-		result, err := validator.ValidateCommitMessage(msg)
+		p, _ := policy.LoadPolicy()
+		result, err := validator.ValidateCommitMessageWithPolicy(msg, p)
 		if err != nil {
 			return err
 		}
@@ -62,12 +67,18 @@ Examples:
 var validatePRCmd = &cobra.Command{
 	Use:   "pr",
 	Short: "Validate a PR description",
+	Long: `Validate a PR description against the ODS PR Description spec.
+
+Examples:
+  ods validate pr --file PR_BODY.md
+  ods validate pr --file body.md --profile enterprise`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		body, err := readInput()
 		if err != nil {
 			return fmt.Errorf("reading PR description: %w", err)
 		}
-		result, err := validator.ValidatePRDescription(body)
+		p, _ := policy.LoadPolicy()
+		result, err := validator.ValidatePRDescriptionWithPolicy(body, p)
 		if err != nil {
 			return err
 		}
@@ -186,6 +197,7 @@ func printResult(r validator.Result) error {
 		for _, w := range r.Warnings {
 			fmt.Printf("   - %s\n", w)
 		}
+		printFixSuggestions(r)
 		if strict && len(r.Warnings) > 0 {
 			return fmt.Errorf("validation failed with %d warning(s) in strict mode", len(r.Warnings))
 		}
@@ -194,6 +206,7 @@ func printResult(r validator.Result) error {
 		for _, e := range r.Errors {
 			fmt.Printf("   - %s\n", e)
 		}
+		printFixSuggestions(r)
 		errCount := len(r.Errors)
 		if strict && len(r.Warnings) > 0 {
 			fmt.Println("\nWarnings (treated as errors in strict mode):")
@@ -205,6 +218,22 @@ func printResult(r validator.Result) error {
 		return fmt.Errorf("validation failed with %d error(s)", errCount)
 	}
 	return nil
+}
+
+func printFixSuggestions(r validator.Result) {
+	if len(r.FixSuggestions) == 0 {
+		return
+	}
+	fmt.Println("\n🔧 Fix suggestions:")
+	for i, fs := range r.FixSuggestions {
+		fmt.Printf("  %d. %s\n", i+1, fs.Title)
+		if fs.Description != "" {
+			fmt.Printf("     %s\n", fs.Description)
+		}
+		if fs.Template != "" {
+			fmt.Printf("     Template: %s\n", fs.Template)
+		}
+	}
 }
 
 // ioReadAll avoids importing io/ioutil (deprecated) and io for minimal deps

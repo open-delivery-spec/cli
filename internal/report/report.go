@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-delivery-spec/cli/internal/policy"
 	"github.com/open-delivery-spec/cli/internal/validator"
 )
 
@@ -44,28 +45,31 @@ type Inputs struct {
 }
 
 type Check struct {
-	ID       string      `json:"id"`
-	Name     string      `json:"name"`
-	Status   CheckStatus `json:"status"`
-	Score    int         `json:"score,omitempty"`
-	Value    string      `json:"value,omitempty"`
-	Notes    []string    `json:"notes,omitempty"`
-	Errors   []string    `json:"errors,omitempty"`
-	Warnings []string    `json:"warnings,omitempty"`
+	ID             string                    `json:"id"`
+	Name           string                    `json:"name"`
+	Status         CheckStatus               `json:"status"`
+	Score          int                       `json:"score,omitempty"`
+	Value          string                    `json:"value,omitempty"`
+	Notes          []string                  `json:"notes,omitempty"`
+	Errors         []string                  `json:"errors,omitempty"`
+	Warnings       []string                  `json:"warnings,omitempty"`
+	FixSuggestions []validator.FixSuggestion `json:"fix_suggestions,omitempty"`
 }
 
 type Report struct {
-	Title       string    `json:"title"`
-	Profile     string    `json:"profile"`
-	Status      Status    `json:"status"`
-	Score       int       `json:"score"`
-	GeneratedAt time.Time `json:"generated_at"`
-	Repository  string    `json:"repository,omitempty"`
-	Ref         string    `json:"ref,omitempty"`
-	SHA         string    `json:"sha,omitempty"`
-	PRNumber    int       `json:"pr_number,omitempty"`
-	BranchName  string    `json:"branch_name,omitempty"`
-	Checks      []Check   `json:"checks"`
+	Title         string         `json:"title"`
+	Profile       string         `json:"profile"`
+	PolicyProfile string         `json:"policy_profile,omitempty"`
+	Status        Status         `json:"status"`
+	Score         int            `json:"score"`
+	GeneratedAt   time.Time      `json:"generated_at"`
+	Repository    string         `json:"repository,omitempty"`
+	Ref           string         `json:"ref,omitempty"`
+	SHA           string         `json:"sha,omitempty"`
+	PRNumber      int            `json:"pr_number,omitempty"`
+	BranchName    string         `json:"branch_name,omitempty"`
+	Checks        []Check        `json:"checks"`
+	Policy        *policy.Policy `json:"policy,omitempty"`
 }
 
 type Options struct {
@@ -110,34 +114,43 @@ func Build(in Inputs, opts Options) Report {
 		generatedAt = time.Now().UTC()
 	}
 
+	// Load policy for report metadata
+	p, err := policy.LoadPolicy()
+	policyProfile := "enterprise"
+	if err == nil && p != nil {
+		policyProfile = p.Profile
+	}
+
 	r := Report{
-		Title:       "ODS Compliance Report",
-		Profile:     "L1",
-		GeneratedAt: generatedAt,
-		Repository:  in.Repository,
-		Ref:         in.Ref,
-		SHA:         in.SHA,
-		PRNumber:    in.PRNumber,
-		BranchName:  in.BranchName,
-		Checks:      buildChecks(in, opts),
+		Title:         "ODS Compliance Report",
+		Profile:       "L1",
+		PolicyProfile: policyProfile,
+		Policy:        p,
+		GeneratedAt:   generatedAt,
+		Repository:    in.Repository,
+		Ref:           in.Ref,
+		SHA:           in.SHA,
+		PRNumber:      in.PRNumber,
+		BranchName:    in.BranchName,
+		Checks:        buildChecks(in, opts, p),
 	}
 	r.Score, r.Status = summarize(r.Checks)
 	return r
 }
 
-func buildChecks(in Inputs, opts Options) []Check {
+func buildChecks(in Inputs, opts Options, p *policy.Policy) []Check {
 	switch opts.Check {
 	case "branch-naming":
-		return []Check{validateBranch(in.BranchName, opts.Strict)}
+		return []Check{validateBranch(in.BranchName, opts.Strict, p)}
 	case "commit-message":
-		return []Check{validateCommit(in.CommitMessage, opts.Strict)}
+		return []Check{validateCommit(in.CommitMessage, opts.Strict, p)}
 	case "pr-description":
-		return []Check{validatePR(in.PRBody, opts.Strict)}
+		return []Check{validatePR(in.PRBody, opts.Strict, p)}
 	default:
 		return []Check{
-			validateBranch(in.BranchName, opts.Strict),
-			validateCommit(in.CommitMessage, opts.Strict),
-			validatePR(in.PRBody, opts.Strict),
+			validateBranch(in.BranchName, opts.Strict, p),
+			validateCommit(in.CommitMessage, opts.Strict, p),
+			validatePR(in.PRBody, opts.Strict, p),
 		}
 	}
 }
@@ -190,7 +203,11 @@ func Markdown(r Report) (string, error) {
 	fmt.Fprintf(&b, "## ODS Compliance Report\n\n")
 	fmt.Fprintf(&b, "Status: %s %s  \n", statusIcon(r.Status), statusLabel(r.Status))
 	fmt.Fprintf(&b, "Score: %d / 100  \n", r.Score)
-	fmt.Fprintf(&b, "Profile: %s - AI-aware delivery metadata\n", r.Profile)
+	policyDisplay := r.PolicyProfile
+	if policyDisplay == "" {
+		policyDisplay = "enterprise"
+	}
+	fmt.Fprintf(&b, "Policy: `%s` - %s\n", policyDisplay, policyDescription(policyDisplay))
 	if r.Repository != "" || r.Ref != "" || r.SHA != "" || r.PRNumber > 0 {
 		fmt.Fprintf(&b, "\n")
 	}
@@ -211,17 +228,52 @@ func Markdown(r Report) (string, error) {
 	for _, check := range r.Checks {
 		fmt.Fprintf(&b, "| %s | %s %s | %s |\n", check.Name, checkIcon(check.Status), checkLabel(check.Status), escapeMarkdownNotes(check))
 	}
+
+	// Add fix suggestions section if any checks failed or have warnings
+	hasFixes := false
+	for _, check := range r.Checks {
+		if len(check.FixSuggestions) > 0 && (check.Status == CheckFail || check.Status == CheckWarning) {
+			hasFixes = true
+			break
+		}
+	}
+	if hasFixes {
+		fmt.Fprintf(&b, "\n---\n\n## 🔧 Fix Suggestions\n\n")
+		for _, check := range r.Checks {
+			if len(check.FixSuggestions) == 0 || (check.Status != CheckFail && check.Status != CheckWarning) {
+				continue
+			}
+			fmt.Fprintf(&b, "### %s\n\n", check.Name)
+			for i, fs := range check.FixSuggestions {
+				fmt.Fprintf(&b, "**%d. %s**\n", i+1, fs.Title)
+				if fs.Description != "" {
+					fmt.Fprintf(&b, "%s\n\n", fs.Description)
+				}
+				if fs.Template != "" {
+					fmt.Fprintf(&b, "```\n%s\n```\n\n", fs.Template)
+				}
+			}
+		}
+	}
+
 	return b.String(), nil
 }
 
 func HTML(r Report) (string, error) {
 	tmpl := template.Must(template.New("report").Funcs(template.FuncMap{
-		"statusLabel": statusLabel,
-		"statusIcon":  statusIcon,
-		"checkLabel":  checkLabel,
-		"checkIcon":   checkIcon,
-		"joinNotes":   joinNotes,
-		"shortSHA":    shortSHA,
+		"statusLabel":       statusLabel,
+		"statusIcon":        statusIcon,
+		"checkLabel":          checkLabel,
+		"checkIcon":           checkIcon,
+		"joinNotes":           joinNotes,
+		"joinNotesHTML":       joinNotesHTML,
+		"shortSHA":            shortSHA,
+		"hasFixSuggestions":   hasFixSuggestions,
+		"fixSuggestionCount":  fixSuggestionCount,
+		"formatFixTemplate":   formatFixTemplate,
+		"scoreColor":          scoreColor,
+		"scoreWidth":          scoreWidth,
+		"add":                 func(a, b int) int { return a + b },
 	}).Parse(reportHTML))
 	var b bytes.Buffer
 	if err := tmpl.Execute(&b, r); err != nil {
@@ -231,8 +283,23 @@ func HTML(r Report) (string, error) {
 }
 
 func SVG(r Report) string {
-	label := "ODS"
-	message := fmt.Sprintf("%s %d", strings.ReplaceAll(statusLabel(r.Status), " ", "-"), r.Score)
+	policyLabel := r.PolicyProfile
+	if policyLabel == "" {
+		policyLabel = "enterprise"
+	}
+	// Shorten policy label for badge
+	switch policyLabel {
+	case "oss":
+		policyLabel = "OSS"
+	case "enterprise":
+		policyLabel = "ENT"
+	case "regulated":
+		policyLabel = "REG"
+	}
+
+	label := fmt.Sprintf("ODS-%s", policyLabel)
+	statusText := statusLabel(r.Status)
+	message := fmt.Sprintf("%s %d/100", statusText, r.Score)
 	color := "brightgreen"
 	switch r.Status {
 	case StatusCompliantWithWarnings:
@@ -240,54 +307,79 @@ func SVG(r Report) string {
 	case StatusNonCompliant:
 		color = "red"
 	}
-	return fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="156" height="20" role="img" aria-label="%s: %s">
+
+	// Adjust width based on message length
+	labelWidth := 70
+	msgWidth := len(message)*7 + 20
+	totalWidth := labelWidth + msgWidth
+	msgX := labelWidth
+
+	return fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="20" role="img" aria-label="%s: %s">
   <title>%s: %s</title>
   <linearGradient id="s" x2="0" y2="100%%">
     <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
     <stop offset="1" stop-opacity=".1"/>
   </linearGradient>
-  <clipPath id="r"><rect width="156" height="20" rx="3" fill="#fff"/></clipPath>
+  <clipPath id="r"><rect width="%d" height="20" rx="3" fill="#fff"/></clipPath>
   <g clip-path="url(#r)">
-    <rect width="43" height="20" fill="#555"/>
-    <rect x="43" width="113" height="20" fill="%s"/>
-    <rect width="156" height="20" fill="url(#s)"/>
+    <rect width="%d" height="20" fill="#555"/>
+    <rect x="%d" width="%d" height="20" fill="%s"/>
+    <rect width="%d" height="20" fill="url(#s)"/>
   </g>
   <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
-    <text x="21.5" y="15" fill="#010101" fill-opacity=".3">%s</text>
-    <text x="21.5" y="14">%s</text>
-    <text x="99.5" y="15" fill="#010101" fill-opacity=".3">%s</text>
-    <text x="99.5" y="14">%s</text>
+    <text x="%d" y="15" fill="#010101" fill-opacity=".3">%s</text>
+    <text x="%d" y="14">%s</text>
+    <text x="%d" y="15" fill="#010101" fill-opacity=".3">%s</text>
+    <text x="%d" y="14">%s</text>
   </g>
 </svg>
-`, html.EscapeString(label), html.EscapeString(message), html.EscapeString(label), html.EscapeString(message), badgeColor(color), html.EscapeString(label), html.EscapeString(label), html.EscapeString(message), html.EscapeString(message))
+`,
+		totalWidth, html.EscapeString(label), html.EscapeString(message),
+		html.EscapeString(label), html.EscapeString(message),
+		totalWidth,
+		labelWidth,
+		labelWidth, msgWidth, badgeColor(color),
+		totalWidth,
+		labelWidth/2, html.EscapeString(label),
+		labelWidth/2, html.EscapeString(label),
+		msgX+msgWidth/2, html.EscapeString(message),
+		msgX+msgWidth/2, html.EscapeString(message),
+	)
 }
 
-func validateBranch(value string, strict bool) Check {
+func validateBranch(value string, strict bool, p *policy.Policy) Check {
 	if strings.TrimSpace(value) == "" {
 		return skipped("branch-naming", "Branch naming", "branch name not detected")
 	}
-	result, err := validator.ValidateBranch(strings.TrimSpace(value))
+	result, err := validator.ValidateBranchWithPolicy(strings.TrimSpace(value), p)
 	return checkFromResult("branch-naming", "Branch naming", value, result, err, strict)
 }
 
-func validateCommit(value string, strict bool) Check {
+func validateCommit(value string, strict bool, p *policy.Policy) Check {
 	if strings.TrimSpace(value) == "" {
 		return skipped("commit-message", "Commit message", "commit message not detected")
 	}
-	result, err := validator.ValidateCommitMessage(value)
+	result, err := validator.ValidateCommitMessageWithPolicy(value, p)
 	return checkFromResult("commit-message", "Commit message", firstLine(value), result, err, strict)
 }
 
-func validatePR(value string, strict bool) Check {
+func validatePR(value string, strict bool, p *policy.Policy) Check {
 	if strings.TrimSpace(value) == "" {
 		return skipped("pr-description", "PR description", "PR body not detected")
 	}
-	result, err := validator.ValidatePRDescription(value)
+	result, err := validator.ValidatePRDescriptionWithPolicy(value, p)
 	return checkFromResult("pr-description", "PR description", "", result, err, strict)
 }
 
 func checkFromResult(id, name, value string, result validator.Result, err error, strict bool) Check {
-	check := Check{ID: id, Name: name, Value: value, Errors: result.Errors, Warnings: result.Warnings}
+	check := Check{
+		ID:             id,
+		Name:           name,
+		Value:          value,
+		Errors:         result.Errors,
+		Warnings:       result.Warnings,
+		FixSuggestions: result.FixSuggestions,
+	}
 	if err != nil && result.Status != validator.StatusNonConformant {
 		check.Errors = append(check.Errors, err.Error())
 	}
@@ -470,11 +562,24 @@ func shortSHA(value string) string {
 func statusLabel(status Status) string {
 	switch status {
 	case StatusCompliant:
-		return "ODS L1 Compliant"
+		return "ODS Compliant"
 	case StatusCompliantWithWarnings:
-		return "ODS L1 Compliant with Warnings"
+		return "ODS Compliant with Warnings"
 	default:
-		return "ODS L1 Non-Compliant"
+		return "ODS Non-Compliant"
+	}
+}
+
+func policyDescription(profile string) string {
+	switch profile {
+	case policy.ProfileOSS:
+		return "Open-source friendly; AI disclosure optional"
+	case policy.ProfileEnterprise:
+		return "Full ODS L1 enforcement with AI disclosure required"
+	case policy.ProfileRegulated:
+		return "Maximum compliance; tickets required, all AI rules enforced"
+	default:
+		return "Custom policy configuration"
 	}
 }
 
@@ -527,6 +632,55 @@ func joinNotes(check Check) string {
 		return "-"
 	}
 	return strings.Join(notes, "; ")
+}
+
+func joinNotesHTML(check Check) template.HTML {
+	parts := make([]string, 0)
+	for _, e := range check.Errors {
+		parts = append(parts, fmt.Sprintf(`<span class="err-item">%s</span>`, html.EscapeString(e)))
+	}
+	for _, w := range check.Warnings {
+		parts = append(parts, fmt.Sprintf(`<span class="warn-item">%s</span>`, html.EscapeString(w)))
+	}
+	if len(parts) == 0 {
+		if check.Value != "" {
+			parts = append(parts, html.EscapeString(check.Value))
+		} else {
+			parts = append(parts, "—")
+		}
+	}
+	return template.HTML(strings.Join(parts, "<br>"))
+}
+
+func hasFixSuggestions(check Check) bool {
+	return len(check.FixSuggestions) > 0 && (check.Status == CheckFail || check.Status == CheckWarning)
+}
+
+func scoreColor(score int) string {
+	switch {
+	case score >= 80:
+		return "#067647"
+	case score >= 50:
+		return "#b54708"
+	default:
+		return "#b42318"
+	}
+}
+
+func scoreWidth(score int) string {
+	return fmt.Sprintf("%d%%", score)
+}
+
+func formatFixTemplate(tmpl string) template.HTML {
+	return template.HTML(fmt.Sprintf("<pre><code>%s</code></pre>", html.EscapeString(tmpl)))
+}
+
+func fixSuggestionCount(checks []Check) int {
+	count := 0
+	for _, c := range checks {
+		count += len(c.FixSuggestions)
+	}
+	return count
 }
 
 func escapeMarkdownNotes(check Check) string {
@@ -705,25 +859,192 @@ const reportHTML = `<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ .Title }}</title>
   <style>
-    :root { color-scheme: light; --ink: #1f2937; --muted: #6b7280; --line: #d1d5db; --ok: #067647; --warn: #b54708; --fail: #b42318; --bg: #f8fafc; }
-    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--ink); background: var(--bg); }
-    main { max-width: 960px; margin: 0 auto; padding: 40px 20px; }
-    header { margin-bottom: 24px; }
-    h1 { font-size: 32px; margin: 0 0 8px; letter-spacing: 0; }
-    .meta { color: var(--muted); line-height: 1.6; }
-    .summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 24px 0; }
-    .metric { border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: white; }
-    .metric span { display: block; color: var(--muted); font-size: 13px; }
-    .metric strong { display: block; margin-top: 4px; font-size: 20px; }
-    table { width: 100%; border-collapse: collapse; background: white; border: 1px solid var(--line); }
-    th, td { padding: 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
-    th { font-size: 13px; color: var(--muted); background: #f3f4f6; }
+    :root {
+      color-scheme: light;
+      --ink: #1f2937;
+      --muted: #6b7280;
+      --line: #d1d5db;
+      --ok: #067647;
+      --ok-bg: #ecfdf3;
+      --warn: #b54708;
+      --warn-bg: #fffaeb;
+      --fail: #b42318;
+      --fail-bg: #fef3f2;
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --radius: 10px;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      line-height: 1.6;
+    }
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 40px 24px;
+    }
+
+    /* Header */
+    header { margin-bottom: 28px; }
+    h1 { font-size: 30px; margin: 0 0 6px; letter-spacing: -0.5px; font-weight: 700; }
+    .meta { color: var(--muted); font-size: 14px; line-height: 1.7; }
+    .meta code { background: #e5e7eb; padding: 1px 6px; border-radius: 4px; font-size: 13px; }
+
+    /* Summary cards */
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin: 28px 0;
+    }
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 18px 16px;
+      background: var(--card);
+      position: relative;
+    }
+    .metric .label {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .metric .value {
+      display: block;
+      font-size: 22px;
+      font-weight: 700;
+    }
+    .metric.status-ok .value { color: var(--ok); }
+    .metric.status-warn .value { color: var(--warn); }
+    .metric.status-fail .value { color: var(--fail); }
+
+    /* Score gauge */
+    .score-gauge {
+      margin: 24px 0;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+    }
+    .score-gauge h3 { margin: 0 0 14px; font-size: 16px; }
+    .gauge-bar {
+      height: 14px;
+      background: #e5e7eb;
+      border-radius: 7px;
+      overflow: hidden;
+      position: relative;
+    }
+    .gauge-fill {
+      height: 100%;
+      border-radius: 7px;
+      transition: width 0.4s ease;
+    }
+    .gauge-labels {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    /* Checks table */
+    section.checks { margin: 28px 0; }
+    section.checks h3 { margin: 0 0 14px; font-size: 16px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    th, td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      font-size: 14px;
+    }
+    th {
+      font-size: 12px;
+      color: var(--muted);
+      background: #f3f4f6;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 600;
+    }
     tr:last-child td { border-bottom: 0; }
     .pass { color: var(--ok); font-weight: 700; }
     .warning { color: var(--warn); font-weight: 700; }
     .fail { color: var(--fail); font-weight: 700; }
     .skipped { color: var(--muted); font-weight: 700; }
-    @media (max-width: 720px) { .summary { grid-template-columns: 1fr; } main { padding: 24px 14px; } }
+    .err-item { color: var(--fail); font-size: 13px; }
+    .warn-item { color: var(--warn); font-size: 13px; }
+
+    /* Fix suggestions */
+    section.fixes { margin: 32px 0; }
+    section.fixes h3 { margin: 0 0 18px; font-size: 18px; }
+    .fix-card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--warn);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      margin-bottom: 14px;
+    }
+    .fix-card.fix-error { border-left-color: var(--fail); }
+    .fix-card h4 { margin: 0 0 6px; font-size: 15px; }
+    .fix-card .fix-desc { color: var(--muted); font-size: 14px; margin-bottom: 10px; }
+    .fix-card pre {
+      background: #f3f4f6;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 12px 14px;
+      overflow-x: auto;
+      font-size: 13px;
+      margin: 0;
+      line-height: 1.5;
+    }
+    .fix-card pre code { color: var(--ink); }
+    .copy-btn {
+      display: inline-block;
+      margin-top: 8px;
+      font-size: 12px;
+      color: #2563eb;
+      text-decoration: none;
+      cursor: pointer;
+      background: none;
+      border: none;
+      font-family: inherit;
+      padding: 4px 8px;
+      border-radius: 4px;
+      transition: background 0.15s;
+    }
+    .copy-btn:hover { background: #eff6ff; }
+
+    /* Policy info */
+    .policy-info {
+      margin-top: 32px;
+      padding: 14px 20px;
+      background: #f3f4f6;
+      border-radius: var(--radius);
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .policy-info strong { color: var(--ink); }
+
+    @media (max-width: 720px) {
+      .summary { grid-template-columns: repeat(2, 1fr); }
+      main { padding: 20px 14px; }
+      h1 { font-size: 24px; }
+    }
   </style>
 </head>
 <body>
@@ -731,26 +1052,86 @@ const reportHTML = `<!doctype html>
     <header>
       <h1>{{ .Title }}</h1>
       <div class="meta">
-        Generated {{ .GeneratedAt.Format "2006-01-02 15:04:05 MST" }}{{ if .Repository }} for {{ .Repository }}{{ end }}{{ if .Ref }} on {{ .Ref }}{{ end }}{{ if .SHA }} at {{ shortSHA .SHA }}{{ end }}{{ if .PRNumber }} for PR #{{ .PRNumber }}{{ end }}
+        Generated <strong>{{ .GeneratedAt.Format "2006-01-02 15:04:05 MST" }}</strong>
+        {{- if .Repository }} &middot; <code>{{ .Repository }}</code>{{ end }}
+        {{- if .Ref }} on <code>{{ .Ref }}</code>{{ end }}
+        {{- if .SHA }} at <code>{{ shortSHA .SHA }}</code>{{ end }}
+        {{- if .PRNumber }} &middot; PR <strong>#{{ .PRNumber }}</strong>{{ end }}
       </div>
     </header>
+
     <section class="summary" aria-label="Report summary">
-      <div class="metric"><span>Status</span><strong>{{ statusIcon .Status }} {{ statusLabel .Status }}</strong></div>
-      <div class="metric"><span>Score</span><strong>{{ .Score }} / 100</strong></div>
-      <div class="metric"><span>Profile</span><strong>{{ .Profile }}</strong></div>
+      <div class="metric status-{{ .Status }}">
+        <span class="label">Status</span>
+        <span class="value">{{ statusIcon .Status }} {{ statusLabel .Status }}</span>
+      </div>
+      <div class="metric">
+        <span class="label">Score</span>
+        <span class="value">{{ .Score }} / 100</span>
+      </div>
+      <div class="metric">
+        <span class="label">Policy</span>
+        <span class="value">{{ .PolicyProfile }}</span>
+      </div>
+      <div class="metric">
+        <span class="label">Fix Suggestions</span>
+        <span class="value">{{ fixSuggestionCount .Checks }}</span>
+      </div>
     </section>
-    <table>
-      <thead><tr><th>Check</th><th>Result</th><th>Notes</th></tr></thead>
-      <tbody>
-        {{ range .Checks }}
-        <tr>
-          <td>{{ .Name }}</td>
-          <td class="{{ .Status }}">{{ checkIcon .Status }} {{ checkLabel .Status }}</td>
-          <td>{{ joinNotes . }}</td>
-        </tr>
+
+    <div class="score-gauge">
+      <h3>Compliance Score</h3>
+      <div class="gauge-bar">
+        <div class="gauge-fill" style="width:{{ scoreWidth .Score }};background:{{ scoreColor .Score }}"></div>
+      </div>
+      <div class="gauge-labels">
+        <span>0</span><span>25</span><span>50</span><span>75</span><span>100</span>
+      </div>
+    </div>
+
+    <section class="checks">
+      <h3>Check Results</h3>
+      <table>
+        <thead><tr><th>Check</th><th>Result</th><th>Details</th></tr></thead>
+        <tbody>
+          {{ range .Checks }}
+          <tr>
+            <td>{{ .Name }}</td>
+            <td class="{{ .Status }}">{{ checkIcon .Status }} {{ checkLabel .Status }}</td>
+            <td>{{ joinNotesHTML . }}</td>
+          </tr>
+          {{ end }}
+        </tbody>
+      </table>
+    </section>
+
+    {{ if gt (fixSuggestionCount .Checks) 0 }}
+    <section class="fixes">
+      <h3>🔧 Fix Suggestions</h3>
+      <p style="color:var(--muted);font-size:14px;margin:0 0 16px">
+        Copy and paste the templates below to fix the issues.
+      </p>
+      {{ range .Checks }}
+        {{ if hasFixSuggestions . }}
+          <h4 style="margin:18px 0 10px;font-size:14px;color:var(--muted)">{{ .Name }}</h4>
+          {{ range $i, $fs := .FixSuggestions }}
+          <div class="fix-card">
+            <h4>{{ add 1 $i }}. {{ $fs.Title }}</h4>
+            <div class="fix-desc">{{ $fs.Description }}</div>
+            {{ if $fs.Template }}<pre><code>{{ $fs.Template }}</code></pre>{{ end }}
+            <button class="copy-btn" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent.trim())">📋 Copy template</button>
+          </div>
+          {{ end }}
         {{ end }}
-      </tbody>
-    </table>
+      {{ end }}
+    </section>
+    {{ end }}
+
+    <div class="policy-info">
+      <strong>Policy:</strong> {{ .PolicyProfile }} &middot;
+      <strong>Report:</strong> {{ .Title }} &middot;
+      <strong>Generated:</strong> {{ .GeneratedAt.Format "2006-01-02 15:04:05 MST" }}
+    </div>
   </main>
 </body>
 </html>
