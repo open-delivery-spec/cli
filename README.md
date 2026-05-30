@@ -3,11 +3,24 @@
 **Reference CLI tool for Open Delivery Spec validation.**
 
 [![CI](https://github.com/open-delivery-spec/cli/actions/workflows/ci.yml/badge.svg)](https://github.com/open-delivery-spec/cli/actions/workflows/ci.yml)
+[![ODS L1](https://img.shields.io/badge/ODS-L1%20Structured%20Delivery-blue)](https://open-delivery-spec.dev)
 [![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-> [!NOTE]  
-> **Status**: Early development. The production-ready M1 surface is `ods validate branch`, `ods validate commit`, and `ods validate pr`. Other validation commands are schema checks for draft modules. Command groups such as `generate`, `release`, `evidence`, `ci`, and `approval` are experimental and may print placeholder output. See [Roadmap](https://github.com/open-delivery-spec/spec/blob/main/ROADMAP.md) for module maturity.
+> **Dogfooding:** This repository uses ODS to validate its own PRs.
+
+## Stable Surface
+
+The ODS CLI is a **validator and report generator** for the ODS L1 specification. The production-ready commands are:
+
+| Command | Purpose | Status |
+|---------|---------|--------|
+| `ods init` | Scaffold ODS config in a repo | ✅ Production |
+| `ods validate branch\|commit\|pr` | Validate delivery artifacts | ✅ Production |
+| `ods report` | Generate compliance report (HTML, JSON, SVG, Markdown, SARIF) | ✅ Production |
+
+> [!NOTE]
+> Other command groups (`generate`, `release`, `evidence`, `ci`, `review`, `approval`) are **experimental** — they exist as direction-setting placeholders for future modules 04-09 and may produce placeholder output. They are intentionally not the recommended surface today. See [Roadmap](https://github.com/open-delivery-spec/spec/blob/main/ROADMAP.md) for module maturity.
 
 ## Install
 
@@ -20,6 +33,9 @@ or download from [Releases](https://github.com/open-delivery-spec/cli/releases).
 ## Quick Start
 
 ```bash
+# One-command scaffold for a new repo
+ods init github
+
 # Validate a branch name
 ods validate branch feature/add-oauth-login
 
@@ -29,7 +45,7 @@ ods validate commit --file commit-msg.txt
 # Validate a PR description
 ods validate pr --file PR_BODY.md
 
-# Generate an HTML/Markdown/JSON/SVG compliance report
+# Generate a compliance report (HTML, JSON, SVG, Markdown, SARIF)
 ods report
 
 # Strict mode — treat warnings as errors
@@ -62,10 +78,11 @@ The command writes `ods-report/` by default:
 
 ```text
 ods-report/
-├── index.html
-├── ods-compliance.json
-├── ods-compliance.svg
-└── ods-summary.md
+├── index.html              (standalone HTML report)
+├── ods-compliance.json     (machine-readable JSON)
+├── ods-compliance.svg      (badge for README)
+├── ods-summary.md          (Markdown for CI summaries)
+└── ods-compliance.sarif    (SARIF v2.1.0 for code scanning)
 ```
 
 `ods report` reads GitHub Actions context when available and falls back to local git metadata. PR-only data, such as the PR description, is skipped when it is not available.

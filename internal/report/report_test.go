@@ -135,7 +135,7 @@ func TestWriteFiles(t *testing.T) {
 		t.Fatalf("WriteFiles() error = %v", err)
 	}
 
-	for _, name := range []string{"index.html", "ods-compliance.json", "ods-summary.md", "ods-compliance.svg"} {
+	for _, name := range []string{"index.html", "ods-compliance.json", "ods-summary.md", "ods-compliance.svg", "ods-compliance.sarif"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Fatalf("expected %s to exist: %v", name, err)
 		}

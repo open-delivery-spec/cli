@@ -171,6 +171,12 @@ func WriteFiles(r Report, outputDir string) error {
 	files["index.html"] = []byte(page)
 	files["ods-compliance.svg"] = []byte(SVG(r))
 
+	sarifBytes, err := SARIF(r)
+	if err != nil {
+		return err
+	}
+	files["ods-compliance.sarif"] = sarifBytes
+
 	for name, body := range files {
 		if err := os.WriteFile(filepath.Join(outputDir, name), body, 0644); err != nil {
 			return err
@@ -540,6 +546,156 @@ func badgeColor(color string) string {
 	default:
 		return "#9f9f9f"
 	}
+}
+
+// SARIF generates a SARIF v2.1.0 log file from the report.
+// SARIF (Static Analysis Results Interchange Format) is an OASIS standard
+// supported by GitHub code scanning, Azure DevOps, and other CI tools.
+func SARIF(r Report) ([]byte, error) {
+	log := sarifLog{
+		Version: "2.1.0",
+		Schema:  "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+		Runs: []sarifRun{{
+			Tool: sarifTool{
+				Driver: sarifDriver{
+					Name:           "ODS CLI",
+					Version:        "1.0.0",
+					InformationURI: "https://open-delivery-spec.dev",
+					Rules:          buildSARIFRules(),
+				},
+			},
+			Results: buildSARIFResults(r),
+		}},
+	}
+
+	if r.Repository != "" {
+		log.Runs[0].VersionControlProvenance = []sarifVersionControl{{
+			RepositoryURI: fmt.Sprintf("https://github.com/%s", r.Repository),
+			RevisionID:    r.SHA,
+		}}
+	}
+
+	return json.MarshalIndent(log, "", "  ")
+}
+
+type sarifLog struct {
+	Version string     `json:"version"`
+	Schema  string     `json:"$schema"`
+	Runs    []sarifRun `json:"runs"`
+}
+
+type sarifRun struct {
+	Tool                       sarifTool              `json:"tool"`
+	Results                    []sarifResult          `json:"results"`
+	VersionControlProvenance   []sarifVersionControl  `json:"versionControlProvenance,omitempty"`
+}
+
+type sarifTool struct {
+	Driver sarifDriver `json:"driver"`
+}
+
+type sarifDriver struct {
+	Name           string      `json:"name"`
+	Version        string      `json:"version"`
+	InformationURI string      `json:"informationUri"`
+	Rules          []sarifRule `json:"rules"`
+}
+
+type sarifRule struct {
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	ShortDescription sarifMessage `json:"shortDescription"`
+	HelpURI          string `json:"helpUri,omitempty"`
+}
+
+type sarifResult struct {
+	RuleID    string        `json:"ruleId"`
+	RuleIndex int           `json:"ruleIndex"`
+	Level     string        `json:"level"`
+	Message   sarifMessage  `json:"message"`
+	Locations []sarifLocation `json:"locations,omitempty"`
+}
+
+type sarifMessage struct {
+	Text string `json:"text"`
+}
+
+type sarifLocation struct {
+	PhysicalLocation sarifPhysicalLocation `json:"physicalLocation"`
+}
+
+type sarifPhysicalLocation struct {
+	ArtifactLocation sarifArtifactLocation `json:"artifactLocation"`
+}
+
+type sarifArtifactLocation struct {
+	URI string `json:"uri"`
+}
+
+type sarifVersionControl struct {
+	RepositoryURI string `json:"repositoryUri"`
+	RevisionID    string `json:"revisionId,omitempty"`
+}
+
+func buildSARIFRules() []sarifRule {
+	return []sarifRule{
+		{ID: "ODS01", Name: "BranchNaming", ShortDescription: sarifMessage{Text: "Branch name must follow <type>/<description> format"}, HelpURI: "https://open-delivery-spec.dev/modules/01-branch-naming"},
+		{ID: "ODS02", Name: "CommitMessage", ShortDescription: sarifMessage{Text: "Commit message must follow Conventional Commits with optional AI attribution"}, HelpURI: "https://open-delivery-spec.dev/modules/02-commit-message"},
+		{ID: "ODS03", Name: "PRDescription", ShortDescription: sarifMessage{Text: "PR description must include required sections and AI disclosure"}, HelpURI: "https://open-delivery-spec.dev/modules/03-pr-description"},
+	}
+}
+
+func buildSARIFResults(r Report) []sarifResult {
+	results := make([]sarifResult, 0, len(r.Checks))
+	for i, check := range r.Checks {
+		if check.Status == CheckSkipped || check.Status == CheckPass {
+			continue
+		}
+
+		level := "warning"
+		if check.Status == CheckFail {
+			level = "error"
+		}
+
+		message := check.Name + ": " + joinNotes(check)
+		if len(check.Errors) > 0 {
+			message = check.Name + ": " + strings.Join(check.Errors, "; ")
+		} else if len(check.Warnings) > 0 {
+			message = check.Name + ": " + strings.Join(check.Warnings, "; ")
+		}
+
+		var ruleIndex int
+		switch check.ID {
+		case "branch-naming":
+			ruleIndex = 0
+		case "commit-message":
+			ruleIndex = 1
+		case "pr-description":
+			ruleIndex = 2
+		default:
+			ruleIndex = i
+		}
+
+		result := sarifResult{
+			RuleID:    fmt.Sprintf("ODS%02d", ruleIndex+1),
+			RuleIndex: ruleIndex,
+			Level:     level,
+			Message:   sarifMessage{Text: message},
+		}
+
+		// add file-based location hints for known artifacts
+		switch check.ID {
+		case "branch-naming":
+			result.Locations = []sarifLocation{{PhysicalLocation: sarifPhysicalLocation{ArtifactLocation: sarifArtifactLocation{URI: ".git/refs/heads/" + r.BranchName}}}}
+		case "commit-message":
+			result.Locations = []sarifLocation{{PhysicalLocation: sarifPhysicalLocation{ArtifactLocation: sarifArtifactLocation{URI: ".git/COMMIT_EDITMSG"}}}}
+		case "pr-description":
+			result.Locations = []sarifLocation{{PhysicalLocation: sarifPhysicalLocation{ArtifactLocation: sarifArtifactLocation{URI: fmt.Sprintf(".github/pull_request_template.md#L%d", r.PRNumber)}}}}
+		}
+
+		results = append(results, result)
+	}
+	return results
 }
 
 const reportHTML = `<!doctype html>
