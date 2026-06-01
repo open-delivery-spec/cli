@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/open-delivery-spec/cli/internal/validator"
+	"github.com/open-delivery-spec/cli/internal/version"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -29,7 +30,7 @@ delivery artifacts compliant with the Open Delivery Spec.
 
 Validate branch names, commit messages, PR descriptions,
 release readiness reports, rollback plans, and more.`,
-	Version: "1.0.0",
+	Version: version.Value,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		if schemaDir != "" {
 			return validator.LoadSchemasFromDir(schemaDir)

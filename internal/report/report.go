@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-delivery-spec/cli/internal/policy"
 	"github.com/open-delivery-spec/cli/internal/validator"
+	"github.com/open-delivery-spec/cli/internal/version"
 )
 
 type Status string
@@ -713,7 +714,7 @@ func SARIF(r Report) ([]byte, error) {
 			Tool: sarifTool{
 				Driver: sarifDriver{
 					Name:           "ODS CLI",
-					Version:        "1.0.0",
+					Version:        version.Value,
 					InformationURI: "https://open-delivery-spec.github.io/spec",
 					Rules:          buildSARIFRules(),
 				},
