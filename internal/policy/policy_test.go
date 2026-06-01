@@ -40,8 +40,9 @@ func TestProfilePresets(t *testing.T) {
 	if !presets[ProfileEnterprise].AIDisclosure.Required {
 		t.Fatal("Enterprise profile should require AI disclosure")
 	}
-	if !presets[ProfileEnterprise].Commit.RequireScope {
-		t.Fatal("Enterprise profile should require commit scope")
+	// Scope is optional per Conventional Commits spec
+	if presets[ProfileEnterprise].Commit.RequireScope {
+		t.Fatal("Enterprise profile should not require commit scope (scope is optional per spec)")
 	}
 
 	// Regulated: most strict

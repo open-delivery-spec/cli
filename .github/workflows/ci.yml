@@ -46,7 +46,7 @@ jobs:
           ./ods validate branch hotfix/critical-memory-leak
           ./ods validate branch release/v1.2.0
           ./ods validate branch chore/update-deps
-          ./ods validate branch feature/add-login
+          ./ods validate branch feat/add-login
 
       - name: Validate branch naming (trunk branches)
         run: |
@@ -71,7 +71,7 @@ jobs:
           MSG
 
           ./ods validate commit --stdin <<'MSG'
-          fix(core): resolve null pointer crash
+          fix: resolve null pointer crash
 
           AI-assisted: true
           AI-tool: GitHub Copilot
@@ -82,7 +82,7 @@ jobs:
       - name: Validate commit messages (breaking change)
         run: |
           ./ods validate commit --stdin <<'MSG'
-          feat(core)!: drop support for Node 16
+          feat!: drop support for Node 16
 
           BREAKING CHANGE: minimum Node version is now 18
           MSG

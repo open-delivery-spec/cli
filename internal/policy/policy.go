@@ -138,7 +138,7 @@ func profilePresets() map[string]Policy {
 		ProfileEnterprise: {
 			Profile: ProfileEnterprise,
 			Branch: BranchConfig{
-				AllowedTypes:         []string{"feature", "bugfix", "hotfix", "release", "chore"},
+				AllowedTypes:         []string{"feature", "feat", "bugfix", "fix", "hotfix", "release", "chore"},
 				RequireTicket:        false,
 				MaxDescriptionLength: 100,
 			},
@@ -151,7 +151,7 @@ func profilePresets() map[string]Policy {
 			},
 			Commit: CommitConfig{
 				AllowedTypes:    []string{"feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert"},
-				RequireScope:    true,
+				RequireScope:    false,
 				MaxSubjectLength: 72,
 			},
 			AIDisclosure: AIDisclosure{
@@ -167,14 +167,14 @@ func profilePresets() map[string]Policy {
 				"pr_ai_disclosure": SeverityError,
 				"pr_ai_tool":       SeverityError,
 				"commit_type":      SeverityError,
-				"commit_scope":     SeverityWarning,
+				"commit_format":    SeverityWarning,
 				"commit_ai":        SeverityError,
 			},
 		},
 		ProfileRegulated: {
 			Profile: ProfileRegulated,
 			Branch: BranchConfig{
-				AllowedTypes:         []string{"feature", "bugfix", "hotfix", "release", "chore"},
+				AllowedTypes:         []string{"feature", "feat", "bugfix", "fix", "hotfix", "release", "chore"},
 				RequireTicket:        true,
 				MaxDescriptionLength: 80,
 			},
