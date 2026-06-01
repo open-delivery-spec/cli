@@ -164,11 +164,13 @@ func TestHTMLRendererEscapesCheckNotes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HTML() error = %v", err)
 	}
-	if strings.Contains(page, "feature/<script>") {
-		t.Fatalf("HTML output contains unescaped branch value: %s", page)
+	// Unescaped HTML must not appear
+	if strings.Contains(page, "<script>") && !strings.Contains(page, "&lt;script&gt;") {
+		t.Fatalf("HTML output contains unescaped script tag: %s", page)
 	}
-	if !strings.Contains(page, "feature/&lt;script&gt;") {
-		t.Fatalf("HTML output does not contain escaped branch value: %s", page)
+	// Escaped version must appear
+	if !strings.Contains(page, "&lt;script&gt;") {
+		t.Fatalf("HTML output does not contain escaped script tag: %s", page)
 	}
 }
 

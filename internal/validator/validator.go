@@ -8,16 +8,26 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/open-delivery-spec/cli/internal/policy"
 )
 
 //go:embed schemas/*
 var embeddedSchemas embed.FS
 
+// FixSuggestion represents a copy-paste fix template for a failed check.
+type FixSuggestion struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Template    string `json:"template"`
+}
+
 // Result represents a validation result.
 type Result struct {
-	Status   ValidationStatus `json:"status"`
-	Errors   []string         `json:"errors,omitempty"`
-	Warnings []string         `json:"warnings,omitempty"`
+	Status         ValidationStatus `json:"status"`
+	Errors         []string         `json:"errors,omitempty"`
+	Warnings       []string         `json:"warnings,omitempty"`
+	FixSuggestions []FixSuggestion  `json:"fix_suggestions,omitempty"`
 }
 
 // ValidationStatus indicates conformity level.
@@ -84,8 +94,24 @@ func LoadSchemasFromDir(dir string) error {
 	return nil
 }
 
-// ValidateBranch validates a branch name string.
+// ValidateBranch validates a branch name string using default policy.
 func ValidateBranch(name string) (Result, error) {
+	return ValidateBranchWithPolicy(name, nil)
+}
+
+// ValidateBranchWithPolicy validates a branch name against an ODS policy.
+func ValidateBranchWithPolicy(name string, p *policy.Policy) (Result, error) {
+	if p == nil {
+		defaultP, _ := policy.LoadPolicy()
+		p = defaultP
+		if p == nil {
+			p = &policy.Policy{
+				Branch: policy.BranchConfig{
+					AllowedTypes: []string{"feature", "feat", "bugfix", "fix", "hotfix", "release", "chore"},
+				},
+			}
+		}
+	}
 	result := Result{Status: StatusConformant}
 
 	// trunk branches
@@ -98,19 +124,35 @@ func ValidateBranch(name string) (Result, error) {
 	if len(parts) != 2 {
 		result.Status = StatusNonConformant
 		result.Errors = append(result.Errors, "branch name must be in format <type>/<description>")
+		result.FixSuggestions = append(result.FixSuggestions, FixSuggestion{
+			Title:       "Use correct branch format",
+			Description: "Branch names must follow the <type>/<description> convention.",
+			Template:    "feature/add-my-feature",
+		})
 		return result, nil
 	}
 
 	typ, desc := parts[0], parts[1]
 
 	// validate type
-	validTypes := map[string]bool{
-		"feature": true, "feat": true, "bugfix": true, "fix": true,
-		"hotfix": true, "release": true, "chore": true,
+	validTypes := make(map[string]bool)
+	for _, t := range p.Branch.AllowedTypes {
+		validTypes[t] = true
 	}
 	if !validTypes[typ] {
-		result.Status = StatusNonConformant
-		result.Errors = append(result.Errors, fmt.Sprintf("invalid branch type '%s' — must be one of: feature, bugfix, hotfix, release, chore", typ))
+		errMsg := fmt.Sprintf("invalid branch type '%s' — must be one of: %s", typ, strings.Join(p.Branch.AllowedTypes, ", "))
+		severity := p.GetSeverity("branch_type")
+		if severity == policy.SeverityWarning {
+			result.Warnings = append(result.Warnings, errMsg)
+		} else {
+			result.Status = StatusNonConformant
+			result.Errors = append(result.Errors, errMsg)
+			result.FixSuggestions = append(result.FixSuggestions, FixSuggestion{
+				Title:       "Use a valid branch type",
+				Description: fmt.Sprintf("Replace '%s' with one of: %s", typ, strings.Join(p.Branch.AllowedTypes, ", ")),
+				Template:    fmt.Sprintf("%s/%s", p.Branch.AllowedTypes[0], desc),
+			})
+		}
 	}
 
 	// validate description
@@ -122,14 +164,29 @@ func ValidateBranch(name string) (Result, error) {
 		if strings.ToLower(desc) != desc {
 			result.Status = StatusNonConformant
 			result.Errors = append(result.Errors, "description must be lowercase")
+			result.FixSuggestions = append(result.FixSuggestions, FixSuggestion{
+				Title:       "Lowercase the description",
+				Description: "Convert all uppercase letters to lowercase.",
+				Template:    fmt.Sprintf("%s/%s", typ, strings.ToLower(desc)),
+			})
 		}
 		if strings.Contains(desc, "_") {
 			result.Status = StatusNonConformant
 			result.Errors = append(result.Errors, "description must not contain underscores")
+			result.FixSuggestions = append(result.FixSuggestions, FixSuggestion{
+				Title:       "Replace underscores with hyphens",
+				Description: "Use hyphens instead of underscores.",
+				Template:    fmt.Sprintf("%s/%s", typ, strings.ReplaceAll(desc, "_", "-")),
+			})
 		}
 		if strings.Contains(desc, " ") {
 			result.Status = StatusNonConformant
 			result.Errors = append(result.Errors, "description must not contain spaces")
+			result.FixSuggestions = append(result.FixSuggestions, FixSuggestion{
+				Title:       "Replace spaces with hyphens",
+				Description: "Use hyphens instead of spaces.",
+				Template:    fmt.Sprintf("%s/%s", typ, strings.ReplaceAll(desc, " ", "-")),
+			})
 		}
 		if strings.Contains(desc, "--") {
 			result.Status = StatusNonConformant
@@ -138,6 +195,11 @@ func ValidateBranch(name string) (Result, error) {
 		if strings.HasPrefix(desc, "-") || strings.HasSuffix(desc, "-") {
 			result.Status = StatusNonConformant
 			result.Errors = append(result.Errors, "description must not have leading or trailing hyphens")
+			result.FixSuggestions = append(result.FixSuggestions, FixSuggestion{
+				Title:       "Remove leading/trailing hyphens",
+				Description: "Trim hyphens from the start and end of the description.",
+				Template:    fmt.Sprintf("%s/%s", typ, strings.Trim(desc, "-")),
+			})
 		}
 
 		// validate kebab-case pattern (alphanumeric segments separated by hyphens)
@@ -151,17 +213,65 @@ func ValidateBranch(name string) (Result, error) {
 			result.Errors = append(result.Errors, fmt.Sprintf("description '%s' does not match required kebab-case format", desc))
 		}
 
-		// AI marker detection (warning only)
+		// AI marker detection
 		if strings.HasPrefix(desc, "ai-") {
-			result.Warnings = append(result.Warnings, "branch has AI marker — consider enhanced review")
+			aiSeverity := p.AIDisclosure.AIBranchNaming
+			if aiSeverity == "" {
+				aiSeverity = "warning"
+			}
+			switch aiSeverity {
+			case "error", "deny":
+				result.Status = StatusNonConformant
+				result.Errors = append(result.Errors, "AI-prefixed branches are not allowed per policy")
+			case "warning":
+				result.Warnings = append(result.Warnings, "branch has AI marker — consider enhanced review")
+			}
+		}
+
+		// Ticket requirement
+		if p.Branch.RequireTicket {
+			ticketPattern := `^[A-Z]+-\d+`
+			if matched, _ := regexp.MatchString(ticketPattern, desc); !matched {
+				result.Status = StatusNonConformant
+				result.Errors = append(result.Errors, "branch requires a ticket ID (e.g., PROJ-123)")
+				result.FixSuggestions = append(result.FixSuggestions, FixSuggestion{
+					Title:       "Add ticket ID",
+					Description: "Prefix the description with your ticket ID.",
+					Template:    fmt.Sprintf("%s/PROJ-123-%s", typ, desc),
+				})
+			}
+		}
+
+		// Max description length
+		if p.Branch.MaxDescriptionLength > 0 && len(desc) > p.Branch.MaxDescriptionLength {
+			result.Warnings = append(result.Warnings, fmt.Sprintf(
+				"description is %d characters (max %d)", len(desc), p.Branch.MaxDescriptionLength))
 		}
 	}
 
 	return finalizeResult(result), nil
 }
 
-// ValidateCommitMessage validates a commit message string.
+// ValidateCommitMessage validates a commit message string using default policy.
 func ValidateCommitMessage(msg string) (Result, error) {
+	return ValidateCommitMessageWithPolicy(msg, nil)
+}
+
+// ValidateCommitMessageWithPolicy validates a commit message against an ODS policy.
+func ValidateCommitMessageWithPolicy(msg string, p *policy.Policy) (Result, error) {
+	if p == nil {
+		defaultP, _ := policy.LoadPolicy()
+		p = defaultP
+		if p == nil {
+			p = &policy.Policy{
+				Commit: policy.CommitConfig{
+					AllowedTypes:    []string{"feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert"},
+					RequireScope:    false,
+					MaxSubjectLength: 100,
+				},
+			}
+		}
+	}
 	result := Result{Status: StatusConformant}
 	lines := strings.Split(strings.TrimSpace(msg), "\n")
 
@@ -173,10 +283,46 @@ func ValidateCommitMessage(msg string) (Result, error) {
 
 	// parse first line: type(scope): description or type!: description
 	firstLine := lines[0]
-	typePattern := `^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9_-]+\))?!?: .+`
+
+	// Build type pattern from policy
+	typeList := strings.Join(p.Commit.AllowedTypes, "|")
+	scopePart := `(\([a-z0-9_-]+\))?`
+	if p.Commit.RequireScope {
+		scopePart = `\([a-z0-9_-]+\)`
+	}
+	typePattern := fmt.Sprintf(`^(%s)%s!?: .+`, typeList, scopePart)
 	if matched, _ := regexp.MatchString(typePattern, firstLine); !matched {
 		result.Status = StatusNonConformant
-		result.Errors = append(result.Errors, fmt.Sprintf("first line must follow conventional commit format: <type>[scope]: <description>\n  Got: %s", firstLine))
+		errDetail := fmt.Sprintf("first line must follow conventional commit format: <type>[scope]: <description>\n  Got: %s", firstLine)
+		result.Errors = append(result.Errors, errDetail)
+		allowedList := strings.Join(p.Commit.AllowedTypes, ", ")
+		var template string
+		if p.Commit.RequireScope {
+			template = fmt.Sprintf("%s(area): brief description", p.Commit.AllowedTypes[0])
+		} else {
+			template = fmt.Sprintf("%s: brief description", p.Commit.AllowedTypes[0])
+		}
+		result.FixSuggestions = append(result.FixSuggestions, FixSuggestion{
+			Title:       "Use conventional commit format",
+			Description: fmt.Sprintf("Valid types: %s. Format: <type>[scope]: <description>", allowedList),
+			Template:    template,
+		})
+	}
+
+	// check subject length
+	if p.Commit.MaxSubjectLength > 0 && len(firstLine) > p.Commit.MaxSubjectLength {
+		severity := p.GetSeverity("commit_format")
+		errMsg := fmt.Sprintf("subject is %d characters (max %d)", len(firstLine), p.Commit.MaxSubjectLength)
+		if severity == policy.SeverityWarning {
+			result.Warnings = append(result.Warnings, errMsg)
+		} else {
+			result.Errors = append(result.Errors, errMsg)
+		}
+		result.FixSuggestions = append(result.FixSuggestions, FixSuggestion{
+			Title:       "Shorten the commit subject",
+			Description: fmt.Sprintf("Keep the subject line under %d characters.", p.Commit.MaxSubjectLength),
+			Template:    firstLine[:p.Commit.MaxSubjectLength-3] + "...",
+		})
 	}
 
 	// check for breaking change
@@ -196,8 +342,19 @@ func ValidateCommitMessage(msg string) (Result, error) {
 		}
 	}
 	if footerAI && !footerAITool {
-		result.Status = StatusNonConformant
-		result.Errors = append(result.Errors, "AI-assisted: true requires AI-tool to be specified")
+		aiSeverity := p.GetSeverity("commit_ai")
+		errMsg := "AI-assisted: true requires AI-tool to be specified"
+		if aiSeverity == policy.SeverityWarning {
+			result.Warnings = append(result.Warnings, errMsg)
+		} else {
+			result.Status = StatusNonConformant
+			result.Errors = append(result.Errors, errMsg)
+			result.FixSuggestions = append(result.FixSuggestions, FixSuggestion{
+				Title:       "Add AI tool name",
+				Description: "When AI-assisted: true is set, you must specify which AI tool was used.",
+				Template:    "AI-assisted: true\nAI-tool: <tool-name>",
+			})
+		}
 	}
 
 	// AI review field validation
@@ -220,23 +377,103 @@ func ValidateCommitMessage(msg string) (Result, error) {
 	return finalizeResult(result), nil
 }
 
-// ValidatePRDescription validates a PR description string.
+// ValidatePRDescription validates a PR description string using default policy.
 func ValidatePRDescription(body string) (Result, error) {
+	return ValidatePRDescriptionWithPolicy(body, nil)
+}
+
+// ValidatePRDescriptionWithPolicy validates a PR description against an ODS policy.
+func ValidatePRDescriptionWithPolicy(body string, p *policy.Policy) (Result, error) {
+	if p == nil {
+		defaultP, _ := policy.LoadPolicy()
+		p = defaultP
+		if p == nil {
+			p = &policy.Policy{
+				PR: policy.PRConfig{
+					RequiredSections: []string{"## Summary", "## Type", "## AI Disclosure", "## Changes", "## Testing", "## Checklist"},
+					MinChanges:       1,
+				},
+			}
+		}
+	}
 	result := Result{Status: StatusConformant}
 
-	requiredSections := []string{"## Summary", "## Type", "## AI Disclosure", "## Changes", "## Testing", "## Checklist"}
-	for _, section := range requiredSections {
+	missingSections := []string{}
+	for _, section := range p.PR.RequiredSections {
 		if !strings.Contains(body, section) {
+			missingSections = append(missingSections, section)
+		}
+	}
+
+	if len(missingSections) > 0 {
+		severity := p.GetSeverity("pr_sections")
+		errMsg := fmt.Sprintf("missing required section(s): %s", strings.Join(missingSections, ", "))
+		if severity == policy.SeverityWarning {
+			result.Warnings = append(result.Warnings, errMsg)
+		} else {
 			result.Status = StatusNonConformant
-			result.Errors = append(result.Errors, fmt.Sprintf("missing required section: %s", section))
+			result.Errors = append(result.Errors, errMsg)
+			// Build fix template for missing sections
+			var templateBuilder strings.Builder
+			templateBuilder.WriteString("Copy and add the missing section(s) to your PR description:\n\n")
+			for _, section := range missingSections {
+				switch section {
+				case "## Summary":
+					templateBuilder.WriteString("## Summary\n[One sentence describing what this PR does]\n\n")
+				case "## Type":
+					templateBuilder.WriteString("## Type\n- [ ] Feature\n- [ ] Bugfix\n- [ ] Hotfix\n- [ ] Refactor\n- [ ] Documentation\n- [ ] Chore\n\n")
+				case "## AI Disclosure":
+					templateBuilder.WriteString("## AI Disclosure\n- [ ] This PR contains AI-generated code\n- **AI Tool:** [e.g., GitHub Copilot]\n- **AI Scope:** [What the AI generated]\n- **Human Review:** [What the human reviewed]\n\n")
+				case "## Related Issues":
+					templateBuilder.WriteString("## Related Issues\nCloses #[issue-number]\n\n")
+				case "## Changes":
+					templateBuilder.WriteString("## Changes\n- [change 1]\n- [change 2]\n\n")
+				case "## Testing":
+					templateBuilder.WriteString("## Testing\n- [ ] Unit tests added/updated\n- [ ] Integration tests added/updated\n- [ ] Manual testing performed\n\n")
+				case "## Risk Assessment":
+					templateBuilder.WriteString("## Risk Assessment\n- **Deployment risk:** [Low / Medium / High]\n- **Rollback plan:** [description]\n- **Breaking change:** [Yes / No]\n\n")
+				case "## Checklist":
+					templateBuilder.WriteString("## Checklist\n- [ ] Branch naming follows ODS\n- [ ] Commits follow ODS\n- [ ] AI-generated code has been reviewed by a human\n- [ ] No secrets, tokens, or credentials are included\n- [ ] Documentation has been updated\n\n")
+				}
+			}
+			result.FixSuggestions = append(result.FixSuggestions, FixSuggestion{
+				Title:       "Add missing PR sections",
+				Description: fmt.Sprintf("Your PR is missing %d required section(s).", len(missingSections)),
+				Template:    strings.TrimSpace(templateBuilder.String()),
+			})
 		}
 	}
 
 	// AI disclosure check
 	if strings.Contains(body, "This PR contains AI-generated code") {
-		if !strings.Contains(body, "AI Tool:") {
+		if !strings.Contains(body, "AI Tool:") && !strings.Contains(body, "**AI Tool:") {
+			aiSeverity := p.GetSeverity("pr_ai_tool")
+			errMsg := "AI disclosure requires 'AI Tool:' field"
+			if aiSeverity == policy.SeverityWarning {
+				result.Warnings = append(result.Warnings, errMsg)
+			} else {
+				result.Status = StatusNonConformant
+				result.Errors = append(result.Errors, errMsg)
+				result.FixSuggestions = append(result.FixSuggestions, FixSuggestion{
+					Title:       "Add AI Tool name",
+					Description: "When AI-generated code is disclosed, the AI tool name is required.",
+					Template:    "- **AI Tool:** [e.g., GitHub Copilot, Claude, Cursor]",
+				})
+			}
+		}
+	} else if p.AIDisclosure.Required {
+		aiSeverity := p.GetSeverity("pr_ai_disclosure")
+		errMsg := "AI Disclosure section or 'This PR contains AI-generated code' checkbox required"
+		if aiSeverity == policy.SeverityWarning {
+			result.Warnings = append(result.Warnings, errMsg)
+		} else {
 			result.Status = StatusNonConformant
-			result.Errors = append(result.Errors, "AI disclosure requires 'AI Tool:' field")
+			result.Errors = append(result.Errors, errMsg)
+			result.FixSuggestions = append(result.FixSuggestions, FixSuggestion{
+				Title:       "Add AI Disclosure",
+				Description: "Your policy requires AI disclosure in all PRs.",
+				Template:    "## AI Disclosure\n- [ ] This PR contains AI-generated code\n- **AI Tool:** [e.g., GitHub Copilot]\n- **AI Scope:** [What the AI generated]\n- **Human Review:** [What the human reviewed]",
+			})
 		}
 	}
 
