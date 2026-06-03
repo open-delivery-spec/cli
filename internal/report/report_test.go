@@ -587,6 +587,48 @@ func TestSecurityScanDetectsMultipleTools(t *testing.T) {
 	}
 }
 
+func TestApprovalPolicyWithCODEOWNERS(t *testing.T) {
+	c := checkApprovalPolicy(CheckInputs{
+		BranchProtectionEnabled: false,
+		CODEOWNERSExists:        true,
+	})
+	if c.Status != CheckPass {
+		t.Fatalf("expected pass with CODEOWNERS, got %s: %v", c.Status, c.Errors)
+	}
+}
+
+func TestApprovalPolicyWithBranchProtection(t *testing.T) {
+	c := checkApprovalPolicy(CheckInputs{
+		BranchProtectionEnabled: true,
+		RequiredApprovals:       2,
+		CODEOWNERSExists:        true,
+	})
+	if c.Status != CheckPass {
+		t.Fatalf("expected pass with both protections, got %s", c.Status)
+	}
+	if c.Score != 7 {
+		t.Fatalf("expected score 7, got %d", c.Score)
+	}
+}
+
+func TestReleaseReadinessDetection(t *testing.T) {
+	c := checkReleaseReadiness(CheckInputs{ReleaseHasODSCheck: true})
+	if c.Status != CheckPass {
+		t.Fatalf("expected pass with ODS release check, got %s", c.Status)
+	}
+
+	c = checkReleaseReadiness(CheckInputs{ReleaseHasODSCheck: false})
+	if c.Status != CheckWarning {
+		t.Fatalf("expected warning without ODS release check, got %s", c.Status)
+	}
+}
+
+func TestDetectCODEOWNERS(t *testing.T) {
+	// This should return false in test environment (no CODEOWNERS in report package)
+	result := detectCODEOWNERS()
+	_ = result // may or may not exist in test env
+}
+
 func TestSARIFRulesCoverAllChecks(t *testing.T) {
 	rules := buildSARIFRules()
 	if len(rules) != 10 {

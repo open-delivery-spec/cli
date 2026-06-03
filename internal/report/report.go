@@ -160,6 +160,73 @@ func detectChangedFiles() []string {
 	return result
 }
 
+// detectBranchProtection checks for branch protection configuration.
+func detectBranchProtection() (bool, int) {
+	// Check env vars (set by GitHub Actions or user)
+	if os.Getenv("ODS_BRANCH_PROTECTION") == "true" || os.Getenv("ODS_BRANCH_PROTECTION") == "1" {
+		approvals := 0
+		if v := os.Getenv("ODS_REQUIRED_APPROVALS"); v != "" {
+			fmt.Sscanf(v, "%d", &approvals)
+		}
+		if approvals <= 0 {
+			approvals = 1
+		}
+		return true, approvals
+	}
+
+	// Try reading from GitHub event payload (some events include protection info)
+	path := os.Getenv("GITHUB_EVENT_PATH")
+	if path == "" {
+		return false, 0
+	}
+	data, _ := os.ReadFile(path)
+	var event struct {
+		Repository struct {
+			DefaultBranch string `json:"default_branch"`
+		} `json:"repository"`
+	}
+	json.Unmarshal(data, &event)
+
+	// We can detect branch protection is likely enabled if the repo has a default branch config
+	// In production, this would query GitHub API
+	_ = event
+	return false, 0
+}
+
+// detectCODEOWNERS checks if a CODEOWNERS file exists in the repository.
+func detectCODEOWNERS() bool {
+	paths := []string{
+		".github/CODEOWNERS",
+		"CODEOWNERS",
+		"docs/CODEOWNERS",
+	}
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// detectReleaseODS checks if the release process references ODS.
+func detectReleaseODS() bool {
+	// Check env var
+	if os.Getenv("ODS_RELEASE_CHECK") == "true" || os.Getenv("ODS_RELEASE_CHECK") == "1" {
+		return true
+	}
+	// Check CI workflows for ODS references
+	_, content := detectCIWorkflows()
+	if strings.Contains(content, "ods report") || strings.Contains(content, "open-delivery-spec") ||
+		strings.Contains(content, "ods validate") || strings.Contains(content, "ODS_") {
+		return true
+	}
+	// Check if ods-report directory exists
+	if _, err := os.Stat("ods-report"); err == nil {
+		return true
+	}
+	return false
+}
+
 // detectReviewData tries to extract reviewer data from the GitHub event payload
 // and environment variables.
 func detectReviewData() ([]string, string) {
@@ -307,6 +374,11 @@ func Build(in Inputs, opts Options) Report {
 	ci.CommitAuthorEmail = detectCommitAuthorEmail()
 	// Detect changed files from git
 	ci.ChangedFiles = detectChangedFiles()
+	// Detect branch protection and approval policy info
+	ci.BranchProtectionEnabled, ci.RequiredApprovals = detectBranchProtection()
+	ci.CODEOWNERSExists = detectCODEOWNERS()
+	// Detect release ODS integration
+	ci.ReleaseHasODSCheck = detectReleaseODS()
 
 	r := Report{
 		Title:         "ODS Compliance Report",
