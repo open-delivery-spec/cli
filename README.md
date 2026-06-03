@@ -1,23 +1,42 @@
 # ODS CLI
 
-**Open Delivery Spec — AI code delivery compliance framework.**
+> **The CI gate that knows whether a human actually reviewed the AI code.**
 
 [![CI](https://github.com/open-delivery-spec/cli/actions/workflows/ci.yml/badge.svg)](https://github.com/open-delivery-spec/cli/actions/workflows/ci.yml)
-[![ODS L1](https://img.shields.io/badge/ODS-L1%20Structured%20Delivery-blue)](https://github.com/open-delivery-spec/spec)
 [![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-> **Dogfooding:** This repository uses ODS to validate its own PRs.
+> **Dogfooding:** This repository validates its own PRs with ODS.
 
-## What is ODS?
+---
 
-ODS is an **AI-generated code delivery compliance framework**. It checks for the unique risks that AI code introduces:
+## The Problem
 
-- **Review fatigue:** 80% of PRs with AI tools have zero human comments
-- **Identity ambiguity:** Who wrote this — human or AI agent?
-- **Hallucination in production:** AI-invented APIs, packages, configs
-- **Security blind spots:** 25% of AI code has confirmed vulnerabilities
-- **Test vacuum:** AI code works but lacks edge cases and boundaries
+AI makes writing code fast. Everything after AI — review, verification, audit — is now harder:
+
+| What AI changed | Why it's a problem |
+|---|---|
+| **Code velocity ↑** | PR volume grows 3-5× while review capacity stays flat |
+| **Review fatigue** | 80% of AI-assisted PRs have zero human comments |
+| **Attribution vacuum** | Six months later, nobody knows what came from AI vs human |
+| **Hallucination in prod** | AI-invents APIs, packages, configs that slip past tests |
+| **Security blind spots** | 25% of AI-generated code has confirmed vulnerabilities |
+
+**ODS addresses these by making AI contribution visible, verifiable, and auditable** — not by blocking AI, but by ensuring every piece of AI-generated code has a human who certifies they reviewed it.
+
+---
+
+## What ODS Actually Does
+
+ODS is **not** a code quality tool, a linter, or a test framework. It is a **delivery governance layer** for the AI era:
+
+1. **Detects AI-generated code** in commits and PRs (via trailers, disclosure sections, agent patterns)
+2. **Verifies human review actually happened** (not just approval — actual review with evidence)
+3. **Detects AI hallucinations in CI failures** (non-existent symbols, wrong imports, fake URLs)
+4. **Enforces structured delivery artifacts** (branch naming, commit messages, PR descriptions)
+5. **Produces auditable compliance reports** for governance and compliance teams
+
+---
 
 ## Quick Start
 
@@ -25,218 +44,184 @@ ODS is an **AI-generated code delivery compliance framework**. It checks for the
 # Install
 go install github.com/open-delivery-spec/cli/cmd/ods@latest
 
-# Init in your repo
+# Initialize your repo (one command)
 ods init
 
-# Scan your project (zero setup)
-ods report
+# Install pre-commit hooks for instant feedback
+ods hook install
 
-# See what each check means
-ods checks list
-ods checks explain ai-disclosure
+# Run a compliance report
+ods report
 
 # Get fix suggestions
 ods fix
 ```
 
+---
+
 ## Command Reference
 
-| Command | Purpose | Status |
-|---------|---------|--------|
-| `ods init` | Scaffold ODS config in a repo | ✅ Production |
-| `ods report` | Generate compliance report (10 checks, weighted scoring) | ✅ Production |
-| `ods checks list` | List all 10 compliance checks | ✅ Production |
-| `ods checks explain <id>` | Detailed check documentation | ✅ Production |
-| `ods fix` | Generate and apply fix suggestions | ✅ Production |
-| `ods badge` | Generate shields.io JSON for dynamic badges | ✅ Production |
-| `ods validate branch\|commit\|pr` | Validate individual artifacts | ✅ Production |
-| `ods validate rollback\|evidence\|release` | Validate ODS JSON schemas | ✅ Production |
+### Production Commands
 
-> [!NOTE]
-> Other command groups (`generate`, `release`, `evidence`, `ci`, `review`, `approval`) are **experimental** — they exist as direction-setting placeholders for future modules 04-09 and may produce placeholder output. See [Roadmap](https://github.com/open-delivery-spec/spec/blob/main/ROADMAP.md) for module maturity.
+| Command | What it does |
+|---|---|
+| `ods init` | Scaffold ODS config, PR template, CI workflows, AGENTS.md |
+| `ods hook install` | Install pre-commit, commit-msg, pre-push hooks |
+| `ods report` | Generate multi-format compliance report (10 checks, 0-100 score) |
+| `ods fix` | Generate and apply fix suggestions for compliance issues |
+| `ods badge` | Generate shields.io JSON for dynamic compliance badge |
+| `ods checks list` | List all 10 compliance checks |
+| `ods checks explain <id>` | Detailed check documentation |
 
-## Dynamic Badge
+### Validate Commands
 
-Add a live compliance badge to your README:
+| Command | What it validates |
+|---|---|
+| `ods validate branch <name>` | Branch naming (Conventional Branch) |
+| `ods validate commit --file <path>` | Commit message (Conventional Commits + AI trailers) |
+| `ods validate pr --file <path>` | PR description (required sections + AI Disclosure) |
+| `ods validate rollback --file <path>` | Rollback plan JSON |
+| `ods validate evidence --file <path>` | Evidence bundle JSON |
+| `ods validate release --file <path>` | Release readiness JSON |
+| `ods validate approval-policy --file <path>` | Approval policy JSON |
 
-```markdown
-[![ODS](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/USER/REPO/main/ods-report/ods-badge.json)](...)
-```
+### CI Hallucination Detection (Key Differentiator)
 
-Generate the badge JSON with:
+| Command | What it does |
+|---|---|
+| `ods ci parse --file ci.log --pipeline build-123` | Parse CI log → structured report with AI hallucination detection |
+| `ods ci explain --file ci.log --pipeline build-123` | Human-readable explanation of failures with AI attribution |
+| `ods ci fix-suggestions --file ci.log --pipeline build-123` | Prioritized fix suggestions for AI-caused failures |
 
-```bash
-ods badge > ods-report/ods-badge.json
-git add ods-report/ && git commit -m "Update ODS badge"
-```
+`ods ci` detects patterns unique to AI-generated code:
+- **Non-existent symbols** — AI hallucinates functions/classes that don't exist
+- **Wrong imports** — AI invents package paths
+- **Incorrect defaults** — AI generates plausible but wrong config values
+- **Fake URLs** — AI fabricates endpoints
 
-## Checks
+This is currently the only open-source tool that connects CI failure analysis to AI hallucination patterns.
 
-ODS runs 10 compliance checks across four severity tiers:
+### Template Generation
 
-| # | Check | Weight | Category |
-|---|-------|--------|----------|
-| 1 | AI Disclosure | 10 | Critical |
-| 2 | Human Review Evidence | 10 | Critical |
-| 3 | Required CI | 7 | High |
-| 4 | Approval Policy | 7 | High |
-| 5 | AI Agent Commit Detection | 7 | High |
-| 6 | Test Evidence | 7 | High |
-| 7 | Security Scan Evidence | 7 | High |
-| 8 | PR Description | 5 | Medium |
-| 9 | Release Readiness | 5 | Medium |
-| 10 | Commit Message | 2 | Low |
+| Command | What it generates |
+|---|---|
+| `ods generate branch --type feature --desc "add-oauth"` | Conventional Branch name |
+| `ods generate commit --type feat --scope auth --desc "add login" --ai-tool "Claude"` | Conventional Commit with AI disclosure |
+| `ods generate pr --ai-tool "Claude"` | PR description template with AI Disclosure |
+| `ods review generate --pr 42 --level L2` | AI change review record (L1/L2/L3) |
+| `ods review validate --file review.json` | Validate review record against ODS schema |
+
+---
+
+## The 10 Compliance Checks
+
+ODS runs 10 checks across four severity tiers. Each check has a weight that contributes to the 0-100 score.
+
+| # | Check | Weight | Why it matters |
+|---|-------|--------|----------------|
+| 1 | **AI Disclosure** | 10 | Foundation. Without it, you can't audit AI's safety impact. |
+| 2 | **Human Review Evidence** | 10 | 80% of AI PRs get zero human comments. Approval ≠ review. |
+| 3 | **Required CI** | 7 | AI code needs the same safety net as human code. |
+| 4 | **Approval Policy** | 7 | Policy + evidence = defense in depth. |
+| 5 | **AI Agent Commit Detection** | 7 | Agent commits without human review are the highest-risk scenario. |
+| 6 | **Test Evidence** | 7 | AI code most commonly lacks tests for edge cases and boundaries. |
+| 7 | **Security Scan Evidence** | 7 | 25% of AI code has vulnerabilities. A scan is the minimum defense. |
+| 8 | **PR Description** | 5 | Structured descriptions create an audit trail. |
+| 9 | **Release Readiness** | 5 | ODS checks should be release gates, not just PR checks. |
+| 10 | **Commit Message** | 2 | Structured metadata enables automated AI contribution tracking. |
 
 Full documentation: [docs/checks/README.md](docs/checks/README.md)
 
-## Install
+---
 
-```bash
-go install github.com/open-delivery-spec/cli/cmd/ods@latest
+## How AI Disclosure Works
+
+ODS uses **qualitative AI disclosure**, not percentage estimates. Percentages are brittle, easy to game, and don't help reviewers. Instead:
+
+```markdown
+## AI Disclosure
+- [x] This PR contains AI-generated code
+- **AI Tool:** Claude
+- **AI Scope:** OAuth token refresh logic, state validation, unit tests
+- **Human Review:** Verified against OAuth 2.0 spec (RFC 6749), checked PKCE flow,
+  reviewed error handling for token expiry edge cases
 ```
 
-or download from [Releases](https://github.com/open-delivery-spec/cli/releases).
+This tells a reviewer **exactly what to focus on** — the AI Scope is where they need to look hardest, and the Human Review confirms what was already checked.
 
-## Quick Start
-
-```bash
-# One-command scaffold for a new repo
-ods init github
-
-# Validate a branch name
-ods validate branch feature/add-oauth-login
-
-# Validate a commit message (from file or stdin)
-ods validate commit --file commit-msg.txt
-
-# Validate a PR description
-ods validate pr --file PR_BODY.md
-
-# Generate a compliance report (HTML, JSON, SVG, Markdown, SARIF)
-ods report
-
-# Strict mode — treat warnings as errors
-ods validate branch feat/AI-experiment --strict
-```
-
-## Stable M1 Commands
-
-### `ods validate`
-
-Validate the L1 delivery artifacts that are ready for CI enforcement.
-
-```bash
-ods validate branch <name>              # Validate branch name
-ods validate commit [--file | --stdin]  # Validate commit message
-ods validate pr [--file | --stdin]      # Validate PR description
-```
-
-All stable validate subcommands support `--strict` to treat warnings as errors.
+---
 
 ## Compliance Report
 
-Generate an ODS L1 compliance report with convention-first defaults:
-
 ```bash
 ods report
 ```
 
-The command writes `ods-report/` by default:
+The `ods report` command discovers your repository context automatically (branch, commit, PR body, CI config, changed files, reviewer data) and produces:
 
-```text
+```
 ods-report/
-├── index.html              (standalone HTML report)
-├── ods-compliance.json     (machine-readable JSON)
-├── ods-compliance.svg      (badge for README)
-├── ods-summary.md          (Markdown for CI summaries)
-└── ods-compliance.sarif    (SARIF v2.1.0 for code scanning)
+├── index.html              Standalone HTML report
+├── ods-compliance.json     Machine-readable JSON
+├── ods-compliance.svg      Badge for README
+├── ods-summary.md          Markdown for CI summaries
+└── ods-compliance.sarif    SARIF v2.1.0 for GitHub Code Scanning
 ```
 
-`ods report` reads GitHub Actions context when available and falls back to local git metadata. PR-only data, such as the PR description, is skipped when it is not available.
+Output formats via `--format`: terminal (default), json, html, markdown, sarif, files.
 
-Use `--output` only when you need a different report directory:
+Use `--threshold 85` to fail CI if the score drops below a threshold:
+
+```yaml
+# In your CI workflow:
+- run: ods report --format markdown --threshold 85 >> $GITHUB_STEP_SUMMARY
+```
+
+---
+
+## Git Hooks (Instant Feedback)
 
 ```bash
-ods report --output build/ods-report
+ods hook install           # Install all hooks
+ods hook install pre-commit  # Pre-commit only
 ```
 
-## Draft Schema Validation
+Installed hooks catch issues immediately in your terminal:
 
-These commands validate JSON files against draft module expectations. They are useful for experimentation, but the corresponding workflows are not production gates yet.
+- **pre-commit** — Validates branch naming
+- **commit-msg** — Validates commit message format
+- **pre-push** — Quick compliance check before pushing
 
-```bash
-ods validate rollback [--file | --stdin]         # Validate rollback plan JSON
-ods validate evidence [--file | --stdin]         # Validate evidence bundle JSON
-ods validate release [--file | --stdin]          # Validate release readiness JSON
-ods validate approval-policy [--file | --stdin]  # Validate approval policy JSON
-ods review validate [--file | --stdin]           # Validate AI review JSON
-```
+No more waiting for CI to tell you the branch name is wrong.
 
-## Candidate M2 Commands
+---
 
-### `ods review`
+## Policy Profiles
 
-Generate and validate AI change review records with L1/L2/L3 level support.
+ODS ships with three profiles. Select yours in `.ods.yaml`:
 
-```bash
-# Generate L2 review record
-ods review generate --pr 42 --level L2 --ai-pct 45
+| Profile | AI Disclosure | Ticket Required | Commit Scope | Use Case |
+|---|---|---|---|---|
+| `oss` | Optional | No | No | Open-source projects |
+| `enterprise` | Required | No | Yes | Teams adopting AI governance |
+| `regulated` | Required, strict | Yes | Yes | SOC2, HIPAA, FedRAMP |
 
-# Generate L3 review record (auto-detected from high AI percentage)
-ods review generate --pr 99 --level L3 --ai-pct 92
+Enterprise and regulated profiles escalate AI disclosure to blocking errors.
 
-# Validate a review record
-ods review validate --file review.json
+---
 
-# Estimate AI contribution from commit log
-ods review ai-percentage --pr 42
-```
+## AI Agent Integration
 
-### `ods ci`
+ODS works with the tools your team already uses:
 
-Parse CI failure logs and produce structured reports with AI hallucination detection.
+- **Claude Code** — Reads `AGENTS.md` automatically for ODS instructions
+- **Cursor** — Reads `.cursor/rules/ods-compliance.mdc` for context
+- **GitHub Copilot** — PR template is automatically applied
+- **Pre-commit hooks** — Validates before AI-generated commits land
 
-```bash
-# Parse CI log with hallucination detection
-ods ci parse --file ci-output.log --pipeline build-12345 --repo org/my-service
+`ods init` generates all of these files. AI agents become ODS-compliant by default.
 
-# Explain failures in human-readable form
-ods ci explain --file ci-output.log --pipeline build-12345
-
-# Get prioritized fix suggestions
-ods ci fix-suggestions --file ci-output.log --pipeline build-12345
-```
-
-## Experimental Command Groups
-
-The following command groups are registered but currently include placeholder output. They will gain real functionality as their corresponding spec modules mature.
-
-### `ods generate`
-```
-ods generate branch --type feature --description "add-oauth"
-ods generate commit --type feat --scope auth
-ods generate pr
-ods generate release --version v1.4.0
-ods generate rollback --version v1.4.0 --strategy feature_flag
-```
-
-### `ods release`
-```
-ods release check --version v1.4.0
-```
-
-### `ods evidence`
-```
-ods evidence generate --release v1.4.0 --env production
-ods evidence verify <bundle-file>
-ods evidence audit
-```
-
-### `ods approval`
-```
-ods approval validate-policy --file policy.json
-ods approval check --pr 42
-```
+---
 
 ## Configuration
 
@@ -246,22 +231,7 @@ ODS CLI looks for configuration in:
 2. `~/.config/ods/config.yaml` (user home)
 3. Environment variables (`ODS_*`)
 
-```yaml
-# .ods.yaml
-schemas:
-  spec_version: "1.0.0"
-  schema_base_url: "https://open-delivery-spec.dev/schemas"
-
-policies:
-  approval: "ods-approval.json"
-
-ci:
-  provider: github-actions
-```
-
-## Schema Validation
-
-All schemas are defined as [JSON Schema Draft 2020-12](https://json-schema.org/draft/2020-12) in the [spec](https://github.com/open-delivery-spec/spec) repository. The CLI bundles embedded copies and validates artifacts against these specification rules.
+---
 
 ## License
 

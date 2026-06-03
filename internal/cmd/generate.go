@@ -1,24 +1,18 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/spf13/cobra"
 )
 
 var (
-	genType        string
-	genScope       string
-	genDesc        string
-	genAITool      string
-	genVersion     string
-	genEnv         string
-	genStrategy    string
-	genOutput      string
-	genPRNum       int
+	genType   string
+	genScope  string
+	genDesc   string
+	genAITool string
+	genOutput string
 )
 
 var generateCmd = &cobra.Command{
@@ -30,6 +24,11 @@ var generateCmd = &cobra.Command{
 var generateBranchCmd = &cobra.Command{
 	Use:   "branch",
 	Short: "Generate a branch name",
+	Long: `Generate a Conventional Branch compliant branch name.
+
+Examples:
+  ods generate branch --type feature --description "add-oauth-login"
+  ods generate branch --type bugfix --description "fix-null-pointer"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := fmt.Sprintf("%s/%s", genType, genDesc)
 		fmt.Println(name)
@@ -40,6 +39,11 @@ var generateBranchCmd = &cobra.Command{
 var generateCommitCmd = &cobra.Command{
 	Use:   "commit",
 	Short: "Generate a commit message template",
+	Long: `Generate a Conventional Commits compliant commit message with optional AI disclosure.
+
+Examples:
+  ods generate commit --type feat --scope auth --description "add OAuth login"
+  ods generate commit --type feat --description "add OAuth login" --ai-tool "GitHub Copilot"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		scopePart := ""
 		if genScope != "" {
@@ -59,9 +63,15 @@ var generateCommitCmd = &cobra.Command{
 var generatePRCmd = &cobra.Command{
 	Use:   "pr",
 	Short: "Generate a PR description template",
+	Long: `Generate an ODS-compliant PR description template with AI Disclosure section.
+
+Examples:
+  ods generate pr
+  ods generate pr --ai-tool "Claude" --output .github/PULL_REQUEST_TEMPLATE.md`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		aiToolSection := genAITool
 		tmpl := fmt.Sprintf(`## Summary
-[Brief description of changes]
+<!-- Brief description of what this PR does and why. 1-3 sentences. -->
 
 ## Type
 - [ ] Feature
@@ -72,13 +82,14 @@ var generatePRCmd = &cobra.Command{
 - [ ] Chore
 
 ## AI Disclosure
+<!-- Required. Remove the checkbox line if no AI was used. -->
 - [ ] This PR contains AI-generated code
 - **AI Tool:** %s
-- **AI Scope:** [What the AI generated]
-- **Human Review:** [What the human reviewed]
+- **AI Scope:** <!-- What did AI generate? e.g. "auth module, token exchange logic, tests" -->
+- **Human Review:** <!-- What did the human verify? e.g. "Verified OAuth spec compliance, PKCE handling" -->
 
 ## Changes
-- [List key changes]
+- 
 
 ## Testing
 - [ ] Unit tests added/updated
@@ -86,74 +97,17 @@ var generatePRCmd = &cobra.Command{
 - [ ] Manual testing performed
 
 ## Risk Assessment
-- **Deployment risk:** [Low / Medium / High]
-- **Rollback plan:** [Link or brief description]
+- **Deployment risk:** Low / Medium / High
+- **Rollback plan:** <!-- e.g. "Feature flag: oauth-v2" or "Revert commit" -->
+- **Breaking change:** Yes / No
 
 ## Checklist
-- [ ] Branch naming follows ODS
-- [ ] Commits follow ODS
+- [ ] Branch naming follows ODS (<type>/<description>)
+- [ ] Commit messages follow ODS (Conventional Commits + AI attribution)
 - [ ] AI-generated code has been reviewed by a human
 - [ ] No secrets or credentials included
-`, genAITool)
+`, aiToolSection)
 		writeOutput(tmpl)
-		return nil
-	},
-}
-
-var generateRollbackCmd = &cobra.Command{
-	Use:   "rollback",
-	Short: "Generate a rollback plan template",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		plan := map[string]interface{}{
-			"release_id":                  genVersion,
-			"rollback_strategy":           genStrategy,
-			"estimated_rollback_time_minutes": 5,
-			"tested":                      false,
-			"steps": []map[string]interface{}{
-				{"step": 1, "action": "rollback_step_1", "description": "Describe rollback action", "verification": "How to verify success"},
-			},
-			"rollback_indicators": map[string]interface{}{
-				"error_rate_threshold": "> 1% for 5 minutes",
-				"monitoring_dashboard": "[Grafana dashboard URL]",
-				"alert_channel":        "#team-alerts",
-			},
-			"data_rollback": map[string]interface{}{
-				"database_migrations":    false,
-				"migration_reversible":   true,
-				"data_loss_risk":         "none",
-				"backup_taken":           true,
-			},
-			"communication_plan": map[string]interface{}{
-				"notification_template": "Rolling back [RELEASE] due to [REASON]. ETA: [TIME] minutes.",
-			},
-		}
-		data, _ := json.MarshalIndent(plan, "", "  ")
-		writeOutput(string(data))
-		return nil
-	},
-}
-
-var generateReleaseCmd = &cobra.Command{
-	Use:   "release",
-	Short: "Generate a release readiness report template",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		report := map[string]interface{}{
-			"release_id":         genVersion,
-			"target_environment": genEnv,
-			"timestamp":          time.Now().Format(time.RFC3339),
-			"ready":              false,
-			"overall_score":      0,
-			"gates": map[string]interface{}{
-				"ci":              map[string]interface{}{"passed": false, "required": true},
-				"tests":           map[string]interface{}{"passed": false, "required": true},
-				"security_scan":   map[string]interface{}{"passed": false, "required": true},
-				"approvals":       map[string]interface{}{"passed": false, "required": true},
-				"rollback_plan":   map[string]interface{}{"passed": false, "required": true},
-				"breaking_changes": map[string]interface{}{"passed": false, "required": true},
-			},
-		}
-		data, _ := json.MarshalIndent(report, "", "  ")
-		writeOutput(string(data))
 		return nil
 	},
 }
@@ -164,8 +118,6 @@ func init() {
 	generateCmd.AddCommand(generateBranchCmd)
 	generateCmd.AddCommand(generateCommitCmd)
 	generateCmd.AddCommand(generatePRCmd)
-	generateCmd.AddCommand(generateRollbackCmd)
-	generateCmd.AddCommand(generateReleaseCmd)
 
 	// branch
 	generateBranchCmd.Flags().StringVarP(&genType, "type", "t", "feature", "branch type (feature|bugfix|hotfix|release|chore)")
@@ -180,16 +132,8 @@ func init() {
 	// pr
 	generatePRCmd.Flags().StringVar(&genAITool, "ai-tool", "", "AI tool name")
 
-	// rollback
-	generateRollbackCmd.Flags().StringVar(&genVersion, "version", "v0.1.0", "release version")
-	generateRollbackCmd.Flags().StringVar(&genStrategy, "strategy", "feature_flag", "rollback strategy")
-
-	// release
-	generateReleaseCmd.Flags().StringVar(&genVersion, "version", "v0.1.0", "release version")
-	generateReleaseCmd.Flags().StringVar(&genEnv, "env", "staging", "target environment")
-
 	// shared output flag
-	for _, c := range []*cobra.Command{generateCommitCmd, generatePRCmd, generateRollbackCmd, generateReleaseCmd} {
+	for _, c := range []*cobra.Command{generateCommitCmd, generatePRCmd} {
 		c.Flags().StringVarP(&genOutput, "output", "o", "", "output file (default: stdout)")
 	}
 }
