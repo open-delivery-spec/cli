@@ -1,6 +1,6 @@
 # ODS CLI
 
-**Reference CLI tool for Open Delivery Spec validation.**
+**Open Delivery Spec — AI code delivery compliance framework.**
 
 [![CI](https://github.com/open-delivery-spec/cli/actions/workflows/ci.yml/badge.svg)](https://github.com/open-delivery-spec/cli/actions/workflows/ci.yml)
 [![ODS L1](https://img.shields.io/badge/ODS-L1%20Structured%20Delivery-blue)](https://github.com/open-delivery-spec/spec)
@@ -9,18 +9,85 @@
 
 > **Dogfooding:** This repository uses ODS to validate its own PRs.
 
-## Stable Surface
+## What is ODS?
 
-The ODS CLI is a **validator and report generator** for the ODS L1 specification. The production-ready commands are:
+ODS is an **AI-generated code delivery compliance framework**. It checks for the unique risks that AI code introduces:
+
+- **Review fatigue:** 80% of PRs with AI tools have zero human comments
+- **Identity ambiguity:** Who wrote this — human or AI agent?
+- **Hallucination in production:** AI-invented APIs, packages, configs
+- **Security blind spots:** 25% of AI code has confirmed vulnerabilities
+- **Test vacuum:** AI code works but lacks edge cases and boundaries
+
+## Quick Start
+
+```bash
+# Install
+go install github.com/open-delivery-spec/cli/cmd/ods@latest
+
+# Init in your repo
+ods init
+
+# Scan your project (zero setup)
+ods report
+
+# See what each check means
+ods checks list
+ods checks explain ai-disclosure
+
+# Get fix suggestions
+ods fix
+```
+
+## Command Reference
 
 | Command | Purpose | Status |
 |---------|---------|--------|
 | `ods init` | Scaffold ODS config in a repo | ✅ Production |
-| `ods validate branch\|commit\|pr` | Validate delivery artifacts | ✅ Production |
-| `ods report` | Generate compliance report (HTML, JSON, SVG, Markdown, SARIF) | ✅ Production |
+| `ods report` | Generate compliance report (10 checks, weighted scoring) | ✅ Production |
+| `ods checks list` | List all 10 compliance checks | ✅ Production |
+| `ods checks explain <id>` | Detailed check documentation | ✅ Production |
+| `ods fix` | Generate and apply fix suggestions | ✅ Production |
+| `ods badge` | Generate shields.io JSON for dynamic badges | ✅ Production |
+| `ods validate branch\|commit\|pr` | Validate individual artifacts | ✅ Production |
+| `ods validate rollback\|evidence\|release` | Validate ODS JSON schemas | ✅ Production |
 
 > [!NOTE]
-> Other command groups (`generate`, `release`, `evidence`, `ci`, `review`, `approval`) are **experimental** — they exist as direction-setting placeholders for future modules 04-09 and may produce placeholder output. They are intentionally not the recommended surface today. See [Roadmap](https://github.com/open-delivery-spec/spec/blob/main/ROADMAP.md) for module maturity.
+> Other command groups (`generate`, `release`, `evidence`, `ci`, `review`, `approval`) are **experimental** — they exist as direction-setting placeholders for future modules 04-09 and may produce placeholder output. See [Roadmap](https://github.com/open-delivery-spec/spec/blob/main/ROADMAP.md) for module maturity.
+
+## Dynamic Badge
+
+Add a live compliance badge to your README:
+
+```markdown
+[![ODS](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/USER/REPO/main/ods-report/ods-badge.json)](...)
+```
+
+Generate the badge JSON with:
+
+```bash
+ods badge > ods-report/ods-badge.json
+git add ods-report/ && git commit -m "Update ODS badge"
+```
+
+## Checks
+
+ODS runs 10 compliance checks across four severity tiers:
+
+| # | Check | Weight | Category |
+|---|-------|--------|----------|
+| 1 | AI Disclosure | 10 | Critical |
+| 2 | Human Review Evidence | 10 | Critical |
+| 3 | Required CI | 7 | High |
+| 4 | Approval Policy | 7 | High |
+| 5 | AI Agent Commit Detection | 7 | High |
+| 6 | Test Evidence | 7 | High |
+| 7 | Security Scan Evidence | 7 | High |
+| 8 | PR Description | 5 | Medium |
+| 9 | Release Readiness | 5 | Medium |
+| 10 | Commit Message | 2 | Low |
+
+Full documentation: [docs/checks/README.md](docs/checks/README.md)
 
 ## Install
 
