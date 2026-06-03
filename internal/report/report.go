@@ -50,6 +50,7 @@ type Check struct {
 	Name           string                    `json:"name"`
 	Status         CheckStatus               `json:"status"`
 	Score          int                       `json:"score,omitempty"`
+	Weight         int                       `json:"weight"`
 	Value          string                    `json:"value,omitempty"`
 	Notes          []string                  `json:"notes,omitempty"`
 	Errors         []string                  `json:"errors,omitempty"`
@@ -77,6 +78,61 @@ type Options struct {
 	Strict      bool
 	GeneratedAt time.Time
 	Check       string
+}
+
+// detectCIWorkflows checks if CI workflow files exist and returns their combined content.
+func detectCIWorkflows() (bool, string) {
+	workflowDir := ".github/workflows"
+	entries, err := os.ReadDir(workflowDir)
+	if err != nil {
+		return false, ""
+	}
+	var content strings.Builder
+	hasYAML := false
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".yml") || strings.HasSuffix(e.Name(), ".yaml") {
+			data, err := os.ReadFile(filepath.Join(workflowDir, e.Name()))
+			if err == nil {
+				content.Write(data)
+				content.WriteString("\n")
+				hasYAML = true
+			}
+		}
+	}
+	return hasYAML, content.String()
+}
+
+// detectReviewData tries to extract reviewer data from the GitHub event payload.
+func detectReviewData() ([]string, string) {
+	path := os.Getenv("GITHUB_EVENT_PATH")
+	if path == "" {
+		return nil, ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, ""
+	}
+	var event struct {
+		Review struct {
+			User struct {
+				Login string `json:"login"`
+			} `json:"user"`
+			State string `json:"state"`
+		} `json:"review"`
+		PullRequest struct {
+			User struct {
+				Login string `json:"login"`
+			} `json:"user"`
+		} `json:"pull_request"`
+	}
+	if err := json.Unmarshal(data, &event); err != nil {
+		return nil, ""
+	}
+	var reviewers []string
+	if event.Review.User.Login != "" && event.Review.State == "approved" {
+		reviewers = append(reviewers, event.Review.User.Login)
+	}
+	return reviewers, event.PullRequest.User.Login
 }
 
 func DiscoverInputs() Inputs {
@@ -122,6 +178,18 @@ func Build(in Inputs, opts Options) Report {
 		policyProfile = p.Profile
 	}
 
+	// Build check inputs
+	ci := CheckInputs{
+		BranchName:    in.BranchName,
+		CommitMessage: in.CommitMessage,
+		PRBody:        in.PRBody,
+	}
+
+	// Try to detect CI workflows
+	ci.CIWorkflowsExist, ci.CIWorkflowContent = detectCIWorkflows()
+	// Try to detect review data from GitHub event
+	ci.ReviewerLogins, ci.PRAuthor = detectReviewData()
+
 	r := Report{
 		Title:         "ODS Compliance Report",
 		Profile:       "L1",
@@ -133,27 +201,38 @@ func Build(in Inputs, opts Options) Report {
 		SHA:           in.SHA,
 		PRNumber:      in.PRNumber,
 		BranchName:    in.BranchName,
-		Checks:        buildChecks(in, opts, p),
+		Checks:        buildChecks(in, ci, opts, p),
 	}
 	r.Score, r.Status = summarize(r.Checks)
 	return r
 }
 
-func buildChecks(in Inputs, opts Options, p *policy.Policy) []Check {
+func buildChecks(in Inputs, ci CheckInputs, opts Options, p *policy.Policy) []Check {
+	// Determine which checks to run
+	filterID := ""
 	switch opts.Check {
 	case "branch-naming":
 		return []Check{validateBranch(in.BranchName, opts.Strict, p)}
 	case "commit-message":
-		return []Check{validateCommit(in.CommitMessage, opts.Strict, p)}
+		return []Check{checkCommitMessage(ci, opts, p)}
 	case "pr-description":
-		return []Check{validatePR(in.PRBody, opts.Strict, p)}
+		return []Check{checkPRDescription(ci, opts, p)}
+	case "":
+		// Run all checks
 	default:
-		return []Check{
-			validateBranch(in.BranchName, opts.Strict, p),
-			validateCommit(in.CommitMessage, opts.Strict, p),
-			validatePR(in.PRBody, opts.Strict, p),
-		}
+		filterID = opts.Check
 	}
+
+	all := AllChecks(ci, opts, p)
+	if filterID != "" {
+		for _, c := range all {
+			if c.ID == filterID {
+				return []Check{c}
+			}
+		}
+		return []Check{skipped(filterID, filterID, "check not found")}
+	}
+	return all
 }
 
 func WriteFiles(r Report, outputDir string) error {
@@ -373,9 +452,14 @@ func validatePR(value string, strict bool, p *policy.Policy) Check {
 }
 
 func checkFromResult(id, name, value string, result validator.Result, err error, strict bool) Check {
+	weight := checkWeight[id]
+	if weight == 0 {
+		weight = 5 // default
+	}
 	check := Check{
 		ID:             id,
 		Name:           name,
+		Weight:         weight,
 		Value:          value,
 		Errors:         result.Errors,
 		Warnings:       result.Warnings,
@@ -387,7 +471,7 @@ func checkFromResult(id, name, value string, result validator.Result, err error,
 	switch result.Status {
 	case validator.StatusConformant:
 		check.Status = CheckPass
-		check.Score = 100
+		check.Score = weight
 	case validator.StatusConformantWarnings:
 		if strict {
 			check.Status = CheckFail
@@ -395,7 +479,7 @@ func checkFromResult(id, name, value string, result validator.Result, err error,
 			check.Errors = append(check.Errors, "warnings are treated as errors in strict mode")
 		} else {
 			check.Status = CheckWarning
-			check.Score = 75
+			check.Score = weight / 2
 		}
 	default:
 		check.Status = CheckFail
@@ -405,20 +489,31 @@ func checkFromResult(id, name, value string, result validator.Result, err error,
 }
 
 func skipped(id, name, note string) Check {
-	return Check{ID: id, Name: name, Status: CheckSkipped, Notes: []string{note}}
+	w := checkWeight[id]
+	if w == 0 {
+		w = 5
+	}
+	return Check{ID: id, Name: name, Weight: w, Status: CheckSkipped, Notes: []string{note}}
 }
 
+// summarize computes the weighted total score (0-100) and overall status.
+// Scoring model:
+//   - 10 checks with weights: Critical(10), High(7), Medium(5), Low(2)
+//   - Max possible total = 2*10 + 5*7 + 2*5 + 1*2 = 20+35+10+2 = 67 → normalized to 100
+//   - Each check score = weight * (pass/warning/fail multiplier)
+//   - Skipped checks are excluded from normalization
 func summarize(checks []Check) (int, Status) {
-	total := 0
-	count := 0
+	totalScore := 0
+	maxScore := 0
 	hasFail := false
 	hasWarning := false
+
 	for _, check := range checks {
 		if check.Status == CheckSkipped {
 			continue
 		}
-		total += check.Score
-		count++
+		totalScore += check.Score
+		maxScore += check.Weight
 		if check.Status == CheckFail {
 			hasFail = true
 		}
@@ -426,10 +521,17 @@ func summarize(checks []Check) (int, Status) {
 			hasWarning = true
 		}
 	}
-	if count == 0 {
+
+	if maxScore == 0 {
 		return 0, StatusNonCompliant
 	}
-	score := total / count
+
+	// Normalize to 0-100 scale
+	score := 0
+	if maxScore > 0 {
+		score = totalScore * 100 / maxScore
+	}
+
 	switch {
 	case hasFail:
 		return score, StatusNonCompliant
@@ -794,15 +896,36 @@ type sarifVersionControl struct {
 
 func buildSARIFRules() []sarifRule {
 	return []sarifRule{
-		{ID: "ODS01", Name: "BranchNaming", ShortDescription: sarifMessage{Text: "Branch name must follow <type>/<description> format"}, HelpURI: "https://open-delivery-spec.github.io/spec/modules/01-branch-naming"},
-		{ID: "ODS02", Name: "CommitMessage", ShortDescription: sarifMessage{Text: "Commit message must follow Conventional Commits with optional AI attribution"}, HelpURI: "https://open-delivery-spec.github.io/spec/modules/02-commit-message"},
-		{ID: "ODS03", Name: "PRDescription", ShortDescription: sarifMessage{Text: "PR description must include required sections and AI disclosure"}, HelpURI: "https://open-delivery-spec.github.io/spec/modules/03-pr-description"},
+		{ID: "ODS01", Name: "AIDisclosure", ShortDescription: sarifMessage{Text: "AI code disclosure in commits and PRs"}, HelpURI: "https://open-delivery-spec.github.io/spec/checks/ai-disclosure"},
+		{ID: "ODS02", Name: "HumanReviewEvidence", ShortDescription: sarifMessage{Text: "Evidence of human review on AI-generated code"}, HelpURI: "https://open-delivery-spec.github.io/spec/checks/human-review-evidence"},
+		{ID: "ODS03", Name: "RequiredCI", ShortDescription: sarifMessage{Text: "CI workflow is configured and triggers on PRs"}, HelpURI: "https://open-delivery-spec.github.io/spec/checks/required-ci"},
+		{ID: "ODS04", Name: "ApprovalPolicy", ShortDescription: sarifMessage{Text: "Branch protection and approval rules are configured"}, HelpURI: "https://open-delivery-spec.github.io/spec/checks/approval-policy"},
+		{ID: "ODS05", Name: "AIAgentCommitDetection", ShortDescription: sarifMessage{Text: "AI agent commits are detected and flagged"}, HelpURI: "https://open-delivery-spec.github.io/spec/checks/ai-agent-commit-detection"},
+		{ID: "ODS06", Name: "TestEvidence", ShortDescription: sarifMessage{Text: "Test files and test steps are present"}, HelpURI: "https://open-delivery-spec.github.io/spec/checks/test-evidence"},
+		{ID: "ODS07", Name: "SecurityScanEvidence", ShortDescription: sarifMessage{Text: "Security scanning is integrated in CI"}, HelpURI: "https://open-delivery-spec.github.io/spec/checks/security-scan-evidence"},
+		{ID: "ODS08", Name: "CommitMessage", ShortDescription: sarifMessage{Text: "Commit message follows Conventional Commits with AI attribution"}, HelpURI: "https://open-delivery-spec.github.io/spec/checks/commit-message"},
+		{ID: "ODS09", Name: "PRDescription", ShortDescription: sarifMessage{Text: "PR description includes required sections and AI disclosure"}, HelpURI: "https://open-delivery-spec.github.io/spec/checks/pr-description"},
+		{ID: "ODS10", Name: "ReleaseReadiness", ShortDescription: sarifMessage{Text: "Release process integrates ODS compliance checks"}, HelpURI: "https://open-delivery-spec.github.io/spec/checks/release-readiness"},
 	}
 }
 
 func buildSARIFResults(r Report) []sarifResult {
+	// Map check IDs to rule indices
+	ruleIndexMap := map[string]int{
+		"ai-disclosure":             0,
+		"human-review-evidence":     1,
+		"required-ci":               2,
+		"approval-policy":           3,
+		"ai-agent-commit-detection": 4,
+		"test-evidence":             5,
+		"security-scan-evidence":    6,
+		"commit-message":            7,
+		"pr-description":            8,
+		"release-readiness":         9,
+	}
+
 	results := make([]sarifResult, 0, len(r.Checks))
-	for i, check := range r.Checks {
+	for _, check := range r.Checks {
 		if check.Status == CheckSkipped || check.Status == CheckPass {
 			continue
 		}
@@ -819,16 +942,9 @@ func buildSARIFResults(r Report) []sarifResult {
 			message = check.Name + ": " + strings.Join(check.Warnings, "; ")
 		}
 
-		var ruleIndex int
-		switch check.ID {
-		case "branch-naming":
-			ruleIndex = 0
-		case "commit-message":
-			ruleIndex = 1
-		case "pr-description":
-			ruleIndex = 2
-		default:
-			ruleIndex = i
+		ruleIndex, ok := ruleIndexMap[check.ID]
+		if !ok {
+			ruleIndex = 9 // fallback
 		}
 
 		result := sarifResult{
@@ -836,16 +952,6 @@ func buildSARIFResults(r Report) []sarifResult {
 			RuleIndex: ruleIndex,
 			Level:     level,
 			Message:   sarifMessage{Text: message},
-		}
-
-		// add file-based location hints for known artifacts
-		switch check.ID {
-		case "branch-naming":
-			result.Locations = []sarifLocation{{PhysicalLocation: sarifPhysicalLocation{ArtifactLocation: sarifArtifactLocation{URI: ".git/refs/heads/" + r.BranchName}}}}
-		case "commit-message":
-			result.Locations = []sarifLocation{{PhysicalLocation: sarifPhysicalLocation{ArtifactLocation: sarifArtifactLocation{URI: ".git/COMMIT_EDITMSG"}}}}
-		case "pr-description":
-			result.Locations = []sarifLocation{{PhysicalLocation: sarifPhysicalLocation{ArtifactLocation: sarifArtifactLocation{URI: fmt.Sprintf(".github/pull_request_template.md#L%d", r.PRNumber)}}}}
 		}
 
 		results = append(results, result)
