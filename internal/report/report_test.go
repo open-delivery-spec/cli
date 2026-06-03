@@ -451,6 +451,50 @@ func TestHTMLRendererEscapesCheckNotes(t *testing.T) {
 	}
 }
 
+func TestCommitMessageAIAttribution(t *testing.T) {
+	// Commit with full AI attribution should pass
+	c := checkCommitMessage(CheckInputs{
+		CommitMessage: "feat(auth): add oauth login\n\nAI-assisted: true\nAI-tool: GitHub Copilot\nAI-scope: auth module",
+	}, Options{}, nil)
+	if c.Status != CheckPass {
+		t.Fatalf("expected pass with full AI attribution, got %s: %v", c.Status, c.Errors)
+	}
+
+	// Missing AI-tool should fail (enterprise policy)
+	c = checkCommitMessage(CheckInputs{
+		CommitMessage: "feat(auth): add oauth login\n\nAI-assisted: true",
+	}, Options{}, nil)
+	if c.Status != CheckFail {
+		t.Fatalf("expected fail with missing AI-tool, got %s", c.Status)
+	}
+
+	// Breaking change with AI → warning + AI error
+	c = checkCommitMessage(CheckInputs{
+		CommitMessage: "feat(auth)!: replace API\n\nBREAKING CHANGE: session tokens rotated\nAI-assisted: true",
+	}, Options{}, nil)
+	if c.Status != CheckFail {
+		t.Fatalf("expected fail for breaking change + missing AI-tool, got %s", c.Status)
+	}
+}
+
+func TestPRDescriptionAIDisclosure(t *testing.T) {
+	// Full PR with AI disclosure should pass
+	c := checkPRDescription(CheckInputs{
+		PRBody: validPRBody,
+	}, Options{}, nil)
+	if c.Status != CheckPass {
+		t.Fatalf("expected pass with full PR, got %s: %v", c.Status, c.Errors)
+	}
+
+	// Missing AI disclosure when required by enterprise policy → fail
+	c = checkPRDescription(CheckInputs{
+		PRBody: "## Summary\nNo AI section here.\n\n## Type\n- [x] Feature\n\n## Changes\n- stuff\n\n## Testing\n- tests\n\n## Checklist\n- [x] done",
+	}, Options{}, nil)
+	if c.Status != CheckFail {
+		t.Fatalf("expected fail without AI Disclosure section, got %s", c.Status)
+	}
+}
+
 func TestFilterHumanReviewers(t *testing.T) {
 	reviewers := []string{"jane-doe", "github-actions[bot]", "dependabot[bot]", "john-smith", "renovate[bot]"}
 	humans := filterHumanReviewers(reviewers)
