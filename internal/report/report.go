@@ -81,12 +81,25 @@ type Options struct {
 }
 
 // detectCIWorkflows checks if CI workflow files exist and returns their combined content.
+// Searches from the git repo root and falls back to the current directory.
 func detectCIWorkflows() (bool, string) {
-	workflowDir := ".github/workflows"
+	// Determine repo root from git
+	repoRoot := gitOutput("rev-parse", "--show-toplevel")
+	baseDir := "."
+	if repoRoot != "" {
+		baseDir = repoRoot
+	}
+
+	workflowDir := filepath.Join(baseDir, ".github", "workflows")
 	entries, err := os.ReadDir(workflowDir)
 	if err != nil {
-		return false, ""
+		// Fallback to current dir
+		entries, err = os.ReadDir(filepath.Join(".", ".github", "workflows"))
+		if err != nil {
+			return false, ""
+		}
 	}
+
 	var content strings.Builder
 	hasYAML := false
 	for _, e := range entries {

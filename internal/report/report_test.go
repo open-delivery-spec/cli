@@ -493,6 +493,56 @@ func TestCheckWeight(t *testing.T) {
 	}
 }
 
+func TestRequiredCICheckWithPRTrigger(t *testing.T) {
+	c := checkRequiredCI(CheckInputs{
+		CIWorkflowsExist:  true,
+		CIWorkflowContent: "on:\n  pull_request:\n    types: [opened]\njobs:\n  build:\n    runs-on: ubuntu-latest",
+	})
+	if c.Status != CheckPass {
+		t.Fatalf("expected pass with PR trigger, got %s", c.Status)
+	}
+}
+
+func TestRequiredCICheckNoPRTrigger(t *testing.T) {
+	c := checkRequiredCI(CheckInputs{
+		CIWorkflowsExist:  true,
+		CIWorkflowContent: "on: [push]\njobs:\n  build:\n    runs-on: ubuntu-latest",
+	})
+	if c.Status != CheckWarning {
+		t.Fatalf("expected warning without PR trigger, got %s: %v", c.Status, c.Notes)
+	}
+}
+
+func TestTestEvidenceCIOnly(t *testing.T) {
+	// No changed files but CI has test step
+	c := checkTestEvidence(CheckInputs{
+		ChangedFiles:      []string{},
+		CIWorkflowContent: "steps:\n  - run: go test ./...",
+	})
+	// Still skipped because changed files empty
+	if c.Status != CheckSkipped {
+		t.Fatalf("expected skipped with empty changed files, got %s", c.Status)
+	}
+}
+
+func TestSecurityScanDetectsMultipleTools(t *testing.T) {
+	c := checkSecurityScanEvidence(CheckInputs{
+		CIWorkflowContent: "steps:\n  - uses: github/codeql-action/analyze@v3\n  - uses: snyk/actions/golang@master\n  - run: trivy fs .",
+	})
+	if c.Status != CheckPass {
+		t.Fatalf("expected pass, got %s", c.Status)
+	}
+	found := 0
+	for _, n := range c.Notes {
+		if strings.Contains(n, "codeql") {
+			found++
+		}
+	}
+	if found == 0 {
+		t.Fatalf("expected codeql in notes, got %v", c.Notes)
+	}
+}
+
 func TestSARIFRulesCoverAllChecks(t *testing.T) {
 	rules := buildSARIFRules()
 	if len(rules) != 10 {

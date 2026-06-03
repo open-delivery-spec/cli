@@ -555,9 +555,20 @@ func checkTestEvidence(in CheckInputs) Check {
 		c.Notes = append(c.Notes, "test files detected in changes")
 	}
 
-	// Also check CI workflow for test steps
-	if strings.Contains(in.CIWorkflowContent, "test") || strings.Contains(in.CIWorkflowContent, "go test") ||
-		strings.Contains(in.CIWorkflowContent, "npm test") || strings.Contains(in.CIWorkflowContent, "pytest") {
+	// Also check CI workflow for test steps (even without changed files)
+	ciTestPatterns := []string{
+		"go test", "npm test", "pytest", "cargo test", "mix test",
+		"rspec", "jest", "mocha", "phpunit", "bundle exec",
+		"make test", "gradle test", "mvn test", ".NET test", "dotnet test",
+	}
+	ciHasTests := false
+	for _, p := range ciTestPatterns {
+		if strings.Contains(strings.ToLower(in.CIWorkflowContent), strings.ToLower(p)) {
+			ciHasTests = true
+			break
+		}
+	}
+	if ciHasTests {
 		c.Notes = append(c.Notes, "CI workflow includes test step")
 	}
 
@@ -594,6 +605,11 @@ func checkSecurityScanEvidence(in CheckInputs) Check {
 		"codeql", "snyk", "semgrep", "trivy", "gosec", "bandit",
 		"dependabot", "npm audit", "owasp", "safety", "brakeman",
 		"tfsec", "checkov", "dockle", "hadolint",
+		"gitleaks", "trufflehog", "detect-secrets", "secretlint",
+		"zap", "arachni", "nikto", "sqlmap",
+		"kubescape", "kube-bench", "falco",
+		"dependency-check", "osv-scanner", "grype",
+		"sast", "dast", "sca", // generic scan types
 	}
 
 	detectedTools := []string{}
