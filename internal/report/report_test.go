@@ -120,6 +120,9 @@ func TestHumanReviewEvidenceCheck(t *testing.T) {
 	if c.Status != CheckPass {
 		t.Fatalf("expected pass with human review, got %s", c.Status)
 	}
+	if c.Score != 10 {
+		t.Fatalf("expected score 10, got %d", c.Score)
+	}
 
 	// Only bot reviews → fail
 	c = checkHumanReviewEvidence(CheckInputs{
@@ -137,6 +140,36 @@ func TestHumanReviewEvidenceCheck(t *testing.T) {
 	})
 	if c.Status != CheckFail {
 		t.Fatalf("expected fail for self-approve, got %s", c.Status)
+	}
+
+	// AI agent PR with no human review → CRITICAL failure
+	c = checkHumanReviewEvidence(CheckInputs{
+		ReviewerLogins: []string{},
+		PRAuthor:       "github-actions[bot]",
+	})
+	if c.Status != CheckFail {
+		t.Fatalf("expected fail for AI agent PR with no review, got %s", c.Status)
+	}
+	if len(c.Errors) == 0 || !strings.Contains(c.Errors[0], "CRITICAL") {
+		t.Fatalf("expected CRITICAL error for AI agent PR, got: %v", c.Errors)
+	}
+
+	// AI agent PR with human review → pass with note
+	c = checkHumanReviewEvidence(CheckInputs{
+		ReviewerLogins: []string{"jane-doe", "copilot-pull-request-reviewer"},
+		PRAuthor:       "github-actions[bot]",
+	})
+	if c.Status != CheckPass {
+		t.Fatalf("expected pass for AI agent PR with human review, got %s: %v", c.Status, c.Errors)
+	}
+	foundAIMsg := false
+	for _, n := range c.Notes {
+		if strings.Contains(n, "AI agent PR") {
+			foundAIMsg = true
+		}
+	}
+	if !foundAIMsg {
+		t.Fatal("expected note about AI agent PR having human oversight")
 	}
 }
 

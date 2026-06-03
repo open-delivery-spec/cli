@@ -283,39 +283,57 @@ func checkPRDescription(in CheckInputs, opts Options, p *policy.Policy) Check {
 }
 
 // checkHumanReviewEvidence validates that AI code has been reviewed by a human (Critical, weight 10).
+// When an AI agent PR is detected, the check severity is elevated.
 func checkHumanReviewEvidence(in CheckInputs) Check {
 	id := "human-review-evidence"
 	name := "Human Review Evidence"
 
 	if len(in.ReviewerLogins) == 0 && in.PRAuthor == "" {
-		return skipped(id, name, "review data not available — provide via GitHub event payload or explicit flags")
+		return skipped(id, name, "review data not available — provide via GitHub event payload or ODS_REVIEWERS env var")
 	}
 
-	check := Check{ID: id, Name: name, Status: CheckPass, Score: 10}
+	check := Check{ID: id, Name: name, Status: CheckPass, Score: 10, Weight: 10}
 
 	// Detect human reviewers (filter out bot patterns)
 	humanReviewers := filterHumanReviewers(in.ReviewerLogins)
+	isAIAgentPR := in.PRAuthor != "" && isKnownAIAgentUsername(in.PRAuthor) != ""
+
 	if len(humanReviewers) == 0 {
 		check.Status = CheckFail
 		check.Score = 0
-		check.Errors = append(check.Errors,
-			"no human review evidence found — PR was not reviewed by a human reviewer")
+		errMsg := "no human review evidence found — PR was not reviewed by a human reviewer"
+		if isAIAgentPR {
+			errMsg = fmt.Sprintf("CRITICAL: AI agent PR ('%s') has no human review — this is the highest-risk scenario", in.PRAuthor)
+		}
+		check.Errors = append(check.Errors, errMsg)
+		fixTitle := "Request human review"
+		fixDesc := "Ensure at least one human reviewer (non-bot) approves the PR before merge."
+		if isAIAgentPR {
+			fixTitle = "AI agent PR requires mandatory human review"
+			fixDesc = "AI agent PRs must have at least one human reviewer who actually reads the code before merge."
+		}
 		check.FixSuggestions = append(check.FixSuggestions, validator.FixSuggestion{
-			Title:       "Request human review",
-			Description: "Ensure at least one human reviewer (non-bot) approves the PR before merge.",
+			Title:       fixTitle,
+			Description: fixDesc,
 			Template:    "Request review from a team member and ensure they leave a comment or approval.",
 		})
 	} else {
-		check.Notes = append(check.Notes,
-			fmt.Sprintf("human review detected: %d human reviewer(s)", len(humanReviewers)))
+		msg := fmt.Sprintf("human review detected: %d human reviewer(s)", len(humanReviewers))
+		if isAIAgentPR {
+			msg += fmt.Sprintf(" (AI agent PR '%s' has human oversight)", in.PRAuthor)
+		}
+		check.Notes = append(check.Notes, msg)
 	}
 
 	// Self-approve detection
 	if in.PRAuthor != "" && contains(humanReviewers, in.PRAuthor) && len(humanReviewers) == 1 {
 		check.Status = CheckFail
 		check.Score = 0
-		check.Errors = append(check.Errors,
-			fmt.Sprintf("self-approve detected: author '%s' is the only approver", in.PRAuthor))
+		selfApproveMsg := fmt.Sprintf("self-approve detected: author '%s' is the only approver", in.PRAuthor)
+		if isAIAgentPR {
+			selfApproveMsg = fmt.Sprintf("CRITICAL: AI agent '%s' self-approved its own PR — this circumvents all human oversight", in.PRAuthor)
+		}
+		check.Errors = append(check.Errors, selfApproveMsg)
 		check.FixSuggestions = append(check.FixSuggestions, validator.FixSuggestion{
 			Title:       "Request additional review",
 			Description: "Self-approvals are not sufficient. Request review from a different team member.",

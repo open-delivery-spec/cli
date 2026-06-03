@@ -102,8 +102,16 @@ func detectCIWorkflows() (bool, string) {
 	return hasYAML, content.String()
 }
 
-// detectReviewData tries to extract reviewer data from the GitHub event payload.
+// detectReviewData tries to extract reviewer data from the GitHub event payload
+// and environment variables.
 func detectReviewData() ([]string, string) {
+	// Check for explicit env var overrides (for local/dev testing)
+	reviewersEnv := os.Getenv("ODS_REVIEWERS")
+	if reviewersEnv != "" {
+		author := envFirst("ODS_PR_AUTHOR")
+		return strings.Split(reviewersEnv, ","), author
+	}
+
 	path := os.Getenv("GITHUB_EVENT_PATH")
 	if path == "" {
 		return nil, ""
@@ -112,27 +120,75 @@ func detectReviewData() ([]string, string) {
 	if err != nil {
 		return nil, ""
 	}
+
+	// Parse both pull_request and pull_request_review event types
 	var event struct {
+		// For pull_request_review events
 		Review struct {
 			User struct {
 				Login string `json:"login"`
 			} `json:"user"`
 			State string `json:"state"`
 		} `json:"review"`
+		// For pull_request events (contains the PR data)
 		PullRequest struct {
 			User struct {
 				Login string `json:"login"`
 			} `json:"user"`
+			RequestedReviewers []struct {
+				Login string `json:"login"`
+			} `json:"requested_reviewers"`
+			// Approved reviews embedded in PR event
+			Reviews []struct {
+				User  struct {
+					Login string `json:"login"`
+				} `json:"user"`
+				State string `json:"state"`
+			} `json:"reviews"`
 		} `json:"pull_request"`
+		// For push events
+		HeadCommit struct {
+			Author struct {
+				Email    string `json:"email"`
+				Username string `json:"username"`
+			} `json:"author"`
+		} `json:"head_commit"`
+		Sender struct {
+			Login string `json:"login"`
+		} `json:"sender"`
 	}
 	if err := json.Unmarshal(data, &event); err != nil {
 		return nil, ""
 	}
+
 	var reviewers []string
+	seen := map[string]bool{}
+
+	// Collect from review event
 	if event.Review.User.Login != "" && event.Review.State == "approved" {
-		reviewers = append(reviewers, event.Review.User.Login)
+		if !seen[event.Review.User.Login] {
+			reviewers = append(reviewers, event.Review.User.Login)
+			seen[event.Review.User.Login] = true
+		}
 	}
-	return reviewers, event.PullRequest.User.Login
+
+	// Collect from PR embedded reviews (pull_request events often include recent reviews)
+	for _, r := range event.PullRequest.Reviews {
+		if r.State == "approved" && r.User.Login != "" && !seen[r.User.Login] {
+			reviewers = append(reviewers, r.User.Login)
+			seen[r.User.Login] = true
+		}
+	}
+
+	author := event.PullRequest.User.Login
+	if author == "" {
+		author = event.HeadCommit.Author.Username
+	}
+	if author == "" {
+		author = event.Sender.Login
+	}
+
+	return reviewers, author
 }
 
 func DiscoverInputs() Inputs {
