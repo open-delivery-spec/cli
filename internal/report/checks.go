@@ -82,7 +82,7 @@ func checkAIDisclosure(in CheckInputs, p *policy.Policy) Check {
 		return skipped(id, name, "no commit message or PR body available for AI disclosure detection")
 	}
 
-	check := Check{ID: id, Name: name, Status: CheckPass, Score: 10}
+	check := Check{ID: id, Name: name, Status: CheckPass, Score: 10, Weight: 10}
 
 	// 1. Check commit message for RAI trailers
 	hasCommitDisclosure := false
@@ -374,7 +374,7 @@ jobs:
 
 	// Check if CI triggers on PR
 	hasPRTrigger := strings.Contains(in.CIWorkflowContent, "pull_request")
-	c := Check{ID: id, Name: name, Status: CheckPass, Score: 7}
+	c := Check{ID: id, Name: name, Status: CheckPass, Score: 7, Weight: 7}
 	c.Notes = append(c.Notes, "CI workflow detected")
 	if !hasPRTrigger {
 		c.Warnings = append(c.Warnings,
@@ -404,7 +404,7 @@ func checkApprovalPolicy(in CheckInputs) Check {
 		return c
 	}
 
-	c := Check{ID: id, Name: name, Status: CheckPass, Score: 7}
+	c := Check{ID: id, Name: name, Status: CheckPass, Score: 7, Weight: 7}
 	details := []string{}
 	if in.BranchProtectionEnabled {
 		details = append(details, "branch protection enabled")
@@ -424,29 +424,42 @@ func checkAIAgentCommitDetection(in CheckInputs) Check {
 	id := "ai-agent-commit-detection"
 	name := "AI Agent Commit Detection"
 
-	c := Check{ID: id, Name: name, Status: CheckPass, Score: 7}
+	c := Check{ID: id, Name: name, Status: CheckPass, Score: 7, Weight: 7}
 
-	if in.CommitAuthorEmail == "" {
+	if in.CommitAuthorEmail == "" && in.PRAuthor == "" {
 		return skipped(id, name, "commit author email not available")
 	}
 
 	agentPattern := matchAIAgentPattern(in.CommitAuthorEmail)
-	if agentPattern != "" {
-		c.Status = CheckWarning
-		c.Score = 4
-		c.Warnings = append(c.Warnings,
-			fmt.Sprintf("commit author matches AI agent pattern: %s", agentPattern))
-		c.Notes = append(c.Notes, fmt.Sprintf("AI agent detected: %s", agentPattern))
-	} else {
-		c.Notes = append(c.Notes, "no AI agent patterns detected in commit author")
+	agentUsername := ""
+	if in.PRAuthor != "" {
+		agentUsername = isKnownAIAgentUsername(in.PRAuthor)
 	}
 
-	// Check for known AI agent PR author patterns (GitHub handles)
-	if in.PRAuthor != "" && isKnownAIAgentUsername(in.PRAuthor) != "" {
+	if agentPattern != "" || agentUsername != "" {
 		c.Status = CheckWarning
 		c.Score = 4
-		c.Warnings = append(c.Warnings,
-			fmt.Sprintf("PR author '%s' matches known AI agent pattern", in.PRAuthor))
+		if agentPattern != "" {
+			c.Warnings = append(c.Warnings,
+				fmt.Sprintf("commit author email matches AI agent pattern: %s", agentPattern))
+			c.Notes = append(c.Notes, fmt.Sprintf("AI agent detected via email: %s", agentPattern))
+		}
+		if agentUsername != "" {
+			c.Warnings = append(c.Warnings,
+				fmt.Sprintf("PR author '%s' matches known AI agent username pattern: %s", in.PRAuthor, agentUsername))
+			c.Notes = append(c.Notes, fmt.Sprintf("AI agent detected via username: %s", agentUsername))
+		}
+		c.FixSuggestions = append(c.FixSuggestions, validator.FixSuggestion{
+			Title:       "AI agent commit detected — ensure human review",
+			Description: "This commit appears to be authored by an AI agent. Ensure a human has reviewed the code and the PR includes an AI Disclosure section.",
+			Template: `## AI Disclosure
+- [x] This PR contains AI-generated code
+- **AI Tool:** [name of AI tool]
+- **AI Scope:** [what was generated]
+- **Human Review:** [what was reviewed by a human]`,
+		})
+	} else {
+		c.Notes = append(c.Notes, "no AI agent patterns detected in commit author or PR author")
 	}
 
 	return c
@@ -465,6 +478,18 @@ var aiAgentPatterns = []struct {
 	{regexp.MustCompile(`(?i)copilot-`), "GitHub Copilot agent"},
 	{regexp.MustCompile(`(?i)claude[.-]`), "Claude agent"},
 	{regexp.MustCompile(`(?i)cursor[.-]`), "Cursor agent"},
+	{regexp.MustCompile(`(?i)codeium[.-]`), "Codeium/Windsurf agent"},
+	{regexp.MustCompile(`(?i)tabnine[.-]`), "Tabnine agent"},
+	{regexp.MustCompile(`(?i)@amazon\.(com|ai)`), "Amazon Q Developer"},
+	{regexp.MustCompile(`(?i)@microsoft\.[^.]*$`), "Microsoft-owned AI agent"},
+	{regexp.MustCompile(`(?i)swe-agent`), "SWE-agent (autonomous)"},
+	{regexp.MustCompile(`(?i)devika[.-]`), "Devika agent"},
+	{regexp.MustCompile(`(?i)openhands[.-]`), "OpenHands agent"},
+	{regexp.MustCompile(`(?i)aider[.-]`), "Aider AI agent"},
+	{regexp.MustCompile(`(?i)cody[.-]`), "Sourcegraph Cody agent"},
+	{regexp.MustCompile(`(?i)mentat[.-]`), "Mentat agent"},
+	{regexp.MustCompile(`(?i)gpt-pilot`), "GPT Pilot agent"},
+	{regexp.MustCompile(`(?i)bot[+\-_]ai`), "generic bot+ai pattern"},
 }
 
 func matchAIAgentPattern(email string) string {
@@ -506,7 +531,7 @@ func checkTestEvidence(in CheckInputs) Check {
 		return skipped(id, name, "no changed files available for test evidence detection")
 	}
 
-	c := Check{ID: id, Name: name, Status: CheckPass, Score: 7}
+	c := Check{ID: id, Name: name, Status: CheckPass, Score: 7, Weight: 7}
 
 	hasTests := false
 	for _, f := range in.ChangedFiles {
@@ -559,7 +584,7 @@ func checkSecurityScanEvidence(in CheckInputs) Check {
 	id := "security-scan-evidence"
 	name := "Security Scan Evidence"
 
-	c := Check{ID: id, Name: name, Status: CheckPass, Score: 7}
+	c := Check{ID: id, Name: name, Status: CheckPass, Score: 7, Weight: 7}
 
 	if in.CIWorkflowContent == "" {
 		return skipped(id, name, "no CI workflow content available for security scan detection")
@@ -605,7 +630,7 @@ func checkReleaseReadiness(in CheckInputs) Check {
 	id := "release-readiness"
 	name := "Release Readiness"
 
-	c := Check{ID: id, Name: name, Status: CheckPass, Score: 5}
+	c := Check{ID: id, Name: name, Status: CheckPass, Score: 5, Weight: 5}
 
 	if in.ReleaseHasODSCheck {
 		c.Notes = append(c.Notes, "release process integrates ODS checks")

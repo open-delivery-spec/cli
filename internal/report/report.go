@@ -102,6 +102,51 @@ func detectCIWorkflows() (bool, string) {
 	return hasYAML, content.String()
 }
 
+// detectCommitAuthorEmail extracts the commit author email from environment or git.
+func detectCommitAuthorEmail() string {
+	// Check env var first
+	if email := os.Getenv("ODS_COMMIT_AUTHOR_EMAIL"); email != "" {
+		return email
+	}
+	if email := os.Getenv("GITHUB_ACTOR"); email != "" {
+		// GITHUB_ACTOR is a username, not email — but still useful for detection
+		// Fall through to git
+		_ = email
+	}
+	// Try git log for the latest commit author email
+	return gitOutput("log", "-1", "--format=%ae")
+}
+
+// detectChangedFiles returns the list of files changed in the latest commit or PR.
+func detectChangedFiles() []string {
+	// Check env var
+	if files := os.Getenv("ODS_CHANGED_FILES"); files != "" {
+		return strings.Split(files, ",")
+	}
+	// Use git diff to get changed files
+	output := gitOutput("diff", "--name-only", "HEAD~1..HEAD")
+	if output == "" {
+		// Try against main/master
+		for _, base := range []string{"origin/main", "origin/master", "main", "master"} {
+			output = gitOutput("diff", "--name-only", base+"..HEAD")
+			if output != "" {
+				break
+			}
+		}
+	}
+	if output == "" {
+		return nil
+	}
+	var result []string
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			result = append(result, line)
+		}
+	}
+	return result
+}
+
 // detectReviewData tries to extract reviewer data from the GitHub event payload
 // and environment variables.
 func detectReviewData() ([]string, string) {
@@ -245,6 +290,10 @@ func Build(in Inputs, opts Options) Report {
 	ci.CIWorkflowsExist, ci.CIWorkflowContent = detectCIWorkflows()
 	// Try to detect review data from GitHub event
 	ci.ReviewerLogins, ci.PRAuthor = detectReviewData()
+	// Try to detect commit author email
+	ci.CommitAuthorEmail = detectCommitAuthorEmail()
+	// Detect changed files from git
+	ci.ChangedFiles = detectChangedFiles()
 
 	r := Report{
 		Title:         "ODS Compliance Report",
