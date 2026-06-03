@@ -1,6 +1,7 @@
 package report
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -717,4 +718,20 @@ func CheckWeight(id string) int {
 		return 5 // default medium
 	}
 	return w
+}
+
+// FormatJSON marshals the report to JSON bytes.
+func FormatJSON(r Report) ([]byte, error) {
+	return json.MarshalIndent(r, "", "  ")
+}
+
+// FormatSARIF generates SARIF bytes from the report.
+func FormatSARIF(r Report) ([]byte, error) {
+	return SARIF(r)
+}
+
+// SummarizeChecks computes score and status from a list of checks.
+// Exported for CLI use when running selected checks.
+func SummarizeChecks(checks []Check) (int, Status) {
+	return summarize(checks)
 }
