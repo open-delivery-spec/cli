@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/open-delivery-spec/cli/internal/policy"
@@ -101,6 +102,11 @@ func runReport(cmd *cobra.Command, args []string) error {
 		result.PolicyProfile = p.Profile
 	}
 
+	// Write to GitHub step summary if running in Actions
+	if stepSummary := os.Getenv("GITHUB_STEP_SUMMARY"); stepSummary != "" {
+		writeStepSummary(result, stepSummary)
+	}
+
 	// Handle output format
 	switch reportFormat {
 	case "json":
@@ -153,6 +159,22 @@ func runReport(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("ODS compliance report is non-compliant")
 	}
 	return nil
+}
+
+// writeStepSummary appends report results to the GitHub Actions step summary.
+func writeStepSummary(r report.Report, summaryFile string) {
+	md, err := report.Markdown(r)
+	if err != nil {
+		return
+	}
+	f, err := os.OpenFile(summaryFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.WriteString("## ODS Compliance Report\n\n")
+	f.WriteString(md)
+	f.WriteString("\n")
 }
 
 func parseCheckList(s string) []string {
