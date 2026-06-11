@@ -1,40 +1,35 @@
 # ODS CLI
 
-> **The CI gate that knows whether a human actually reviewed the AI code.**
+> **Detect AI-generated code, analyze its quality, and prevent technical debt — before it reaches production.**
 
 [![CI](https://github.com/open-delivery-spec/cli/actions/workflows/ci.yml/badge.svg)](https://github.com/open-delivery-spec/cli/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-> **Dogfooding:** This repository validates its own PRs with ODS.
-
 ---
 
 ## The Problem
 
-AI makes writing code fast. Everything after AI — review, verification, audit — is now harder:
+Enterprises are adopting AI coding tools (Copilot, Cursor, Claude Code) at speed — but AI-generated code increases technical debt in predictable ways:
 
-| What AI changed | Why it's a problem |
+| AI Failure Mode | Real-world impact |
 |---|---|
-| **Code velocity ↑** | PR volume grows 3-5× while review capacity stays flat |
-| **Review fatigue** | 80% of AI-assisted PRs have zero human comments |
-| **Attribution vacuum** | Six months later, nobody knows what came from AI vs human |
-| **Hallucination in prod** | AI-invents APIs, packages, configs that slip past tests |
-| **Security blind spots** | 25% of AI-generated code has confirmed vulnerabilities |
+| **Hallucinated APIs** | AI invents functions, packages, and endpoints that don't exist |
+| **Redundant error handling** | AI over-defends: 3+ identical `if err != nil` blocks in the same function |
+| **Over-commenting** | AI writes 35%+ comment-to-code ratio with self-explanatory comments |
+| **No test coverage** | AI PRs average 22% test coverage vs 68% for human PRs |
+| **Invisible AI code** | Teams can't distinguish AI-generated from human-written changes |
 
-**ODS addresses these by making AI contribution visible, verifiable, and auditable** — not by blocking AI, but by ensuring every piece of AI-generated code has a human who certifies they reviewed it.
+**ODS is the CI gate that detects AI code, analyzes its quality, and blocks low-quality AI changes before they create technical debt.**
 
 ---
 
-## What ODS Actually Does
+## What ODS Does
 
-ODS is **not** a code quality tool, a linter, or a test framework. It is a **delivery governance layer** for the AI era:
-
-1. **Detects AI-generated code** in commits and PRs (via trailers, disclosure sections, agent patterns)
-2. **Verifies human review actually happened** (not just approval — actual review with evidence)
-3. **Detects AI hallucinations in CI failures** (non-existent symbols, wrong imports, fake URLs)
-4. **Enforces structured delivery artifacts** (branch naming, commit messages, PR descriptions)
-5. **Produces auditable compliance reports** for governance and compliance teams
+1. **Detect** — Which code is AI-generated? (without relying on developer self-disclosure)
+2. **Analyze** — What quality issues does the AI code have? (coming in v2)
+3. **Score** — How much technical debt does this PR add? (coming in v2)
+4. **Enforce** — Block low-quality AI code from reaching production. (coming in v2)
 
 ---
 
@@ -44,182 +39,107 @@ ODS is **not** a code quality tool, a linter, or a test framework. It is a **del
 # Install
 go install github.com/open-delivery-spec/cli/cmd/ods@latest
 
-# Initialize your repo (one command)
-ods init
+# Detect AI code in the current branch
+ods detect
 
-# Install pre-commit hooks for instant feedback
-ods hook install
+# Detect against a specific base
+ods detect --diff-base origin/main
 
-# Run a compliance report
-ods report
+# Detect with explicit PR context
+ods detect --branch feature/ai-auth --pr-body "$(cat PR_BODY.md)"
 
-# Get fix suggestions
-ods fix
+# JSON output for CI pipelines
+ods detect --json
 ```
 
 ---
 
 ## Command Reference
 
-### Production Commands
+### AI Code Detection (primary)
 
 | Command | What it does |
 |---|---|
-| `ods init` | Scaffold ODS config, PR template, CI workflows, AGENTS.md |
-| `ods hook install` | Install pre-commit, commit-msg, pre-push hooks |
-| `ods report` | Generate multi-format compliance report (10 checks, 0-100 score) |
-| `ods fix` | Generate and apply fix suggestions for compliance issues |
-| `ods badge` | Generate shields.io JSON for dynamic compliance badge |
-| `ods checks list` | List all 10 compliance checks |
-| `ods checks explain <id>` | Detailed check documentation |
+| `ods detect` | Detect AI-generated code using commit trailers, branch names, PR disclosure, and diff heuristics |
+| `ods detect --json` | Machine-readable JSON output for CI pipelines |
+| `ods detect --format detail` | Detailed file-level AI detection report |
+| `ods detect --diff-base origin/main` | Detect AI code in PR diff against main |
+| `ods detect --pr-body "..."` | Include PR body in detection |
+| `ods detect --commits 20` | Scan last 20 commits for AI markers |
 
-### Validate Commands
+**Detection signals (in order of confidence):**
+1. Git commit trailers (`AI-assisted: true`, `AI-tool: name`)
+2. PR description AI disclosure checkbox/section
+3. Branch name prefix (`ai-*`)
+4. Code diff heuristics (comment ratio, verbose naming, redundant error handling, uniform indentation)
 
-| Command | What it validates |
-|---|---|
-| `ods validate branch <name>` | Branch naming (Conventional Branch) |
-| `ods validate commit --file <path>` | Commit message (Conventional Commits + AI trailers) |
-| `ods validate pr --file <path>` | PR description (required sections + AI Disclosure) |
-| `ods validate rollback --file <path>` | Rollback plan JSON |
-| `ods validate evidence --file <path>` | Evidence bundle JSON |
-| `ods validate release --file <path>` | Release readiness JSON |
-| `ods validate approval-policy --file <path>` | Approval policy JSON |
-
-### CI Hallucination Detection (Key Differentiator)
+### Delivery Governance (legacy)
 
 | Command | What it does |
 |---|---|
-| `ods ci parse --file ci.log --pipeline build-123` | Parse CI log → structured report with AI hallucination detection |
-| `ods ci explain --file ci.log --pipeline build-123` | Human-readable explanation of failures with AI attribution |
-| `ods ci fix-suggestions --file ci.log --pipeline build-123` | Prioritized fix suggestions for AI-caused failures |
-
-`ods ci` detects patterns unique to AI-generated code:
-- **Non-existent symbols** — AI hallucinates functions/classes that don't exist
-- **Wrong imports** — AI invents package paths
-- **Incorrect defaults** — AI generates plausible but wrong config values
-- **Fake URLs** — AI fabricates endpoints
-
-This is currently the only open-source tool that connects CI failure analysis to AI hallucination patterns.
-
-### Template Generation
-
-| Command | What it generates |
-|---|---|
-| `ods generate branch --type feature --desc "add-oauth"` | Conventional Branch name |
-| `ods generate commit --type feat --scope auth --desc "add login" --ai-tool "Claude"` | Conventional Commit with AI disclosure |
-| `ods generate pr --ai-tool "Claude"` | PR description template with AI Disclosure |
-| `ods review generate --pr 42 --level L2` | AI change review record (L1/L2/L3) |
-| `ods review validate --file review.json` | Validate review record against ODS schema |
+| `ods validate branch <name>` | Validate branch naming |
+| `ods validate commit --file <path>` | Validate commit message format |
+| `ods validate pr --file <path>` | Validate PR description structure |
+| `ods report` | Generate compliance report (terminal, JSON, HTML, SARIF, Markdown) |
+| `ods init` | Scaffold ODS config, PR template, CI workflows |
+| `ods hook install` | Install pre-commit, commit-msg hooks |
+| `ods ci parse --file ci.log` | Parse CI failures for AI hallucination patterns |
+| `ods review generate --pr <n> --level L2` | Generate AI change review record |
 
 ---
 
-## The 10 Compliance Checks
+## Detection Examples
 
-ODS runs 10 checks across four severity tiers. Each check has a weight that contributes to the 0-100 score.
-
-| # | Check | Weight | Why it matters |
-|---|-------|--------|----------------|
-| 1 | **AI Disclosure** | 10 | Foundation. Without it, you can't audit AI's safety impact. |
-| 2 | **Human Review Evidence** | 10 | 80% of AI PRs get zero human comments. Approval ≠ review. |
-| 3 | **Required CI** | 7 | AI code needs the same safety net as human code. |
-| 4 | **Approval Policy** | 7 | Policy + evidence = defense in depth. |
-| 5 | **AI Agent Commit Detection** | 7 | Agent commits without human review are the highest-risk scenario. |
-| 6 | **Test Evidence** | 7 | AI code most commonly lacks tests for edge cases and boundaries. |
-| 7 | **Security Scan Evidence** | 7 | 25% of AI code has vulnerabilities. A scan is the minimum defense. |
-| 8 | **PR Description** | 5 | Structured descriptions create an audit trail. |
-| 9 | **Release Readiness** | 5 | ODS checks should be release gates, not just PR checks. |
-| 10 | **Commit Message** | 2 | Structured metadata enables automated AI contribution tracking. |
-
-Full documentation: [docs/checks/README.md](docs/checks/README.md)
-
----
-
-## How AI Disclosure Works
-
-ODS uses **qualitative AI disclosure**, not percentage estimates. Percentages are brittle, easy to game, and don't help reviewers. Instead:
-
-```markdown
-## AI Disclosure
-- [x] This PR contains AI-generated code
-- **AI Tool:** Claude
-- **AI Scope:** OAuth token refresh logic, state validation, unit tests
-- **Human Review:** Verified against OAuth 2.0 spec (RFC 6749), checked PKCE flow,
-  reviewed error handling for token expiry edge cases
-```
-
-This tells a reviewer **exactly what to focus on** — the AI Scope is where they need to look hardest, and the Human Review confirms what was already checked.
-
----
-
-## Compliance Report
+### High-confidence detection (PR body + commit trailer)
 
 ```bash
-ods report
+$ ods detect --pr-body "$(cat pr.md)"
+🤖  AI code detected (confidence: 85%)
+   Sources: pr-body
+   Evidence:
+     • [pr-body] AI disclosure checkbox is checked (85%)
 ```
 
-The `ods report` command discovers your repository context automatically (branch, commit, PR body, CI config, changed files, reviewer data) and produces:
+### Branch-level detection only
 
+```bash
+$ ods detect --branch feature/ai-oauth
+🤖  AI code detected in 0 file(s) — 0/0 lines (confidence: 50%)
+   Sources: branch-name
+   Evidence:
+     • [branch-name] Branch 'feature/ai-oauth' has AI-prefixed segment (35%)
 ```
-ods-report/
-├── index.html              Standalone HTML report
-├── ods-compliance.json     Machine-readable JSON
-├── ods-compliance.svg      Badge for README
-├── ods-summary.md          Markdown for CI summaries
-└── ods-compliance.sarif    SARIF v2.1.0 for GitHub Code Scanning
+
+### No AI detected
+
+```bash
+$ ods detect --branch feature/add-login
+👤  No AI code detected (confidence: 0%)
 ```
 
-Output formats via `--format`: terminal (default), json, html, markdown, sarif, files.
-
-Use `--threshold 85` to fail CI if the score drops below a threshold:
+### CI integration (block AI code in CI)
 
 ```yaml
-# In your CI workflow:
-- run: ods report --format markdown --threshold 85 >> $GITHUB_STEP_SUMMARY
+# .github/workflows/ods.yml
+- name: Detect AI code
+  run: ods detect --json
+  # Exits non-zero if AI code detected with ≥80% confidence
 ```
 
 ---
 
-## Git Hooks (Instant Feedback)
+## How Detection Works
 
-```bash
-ods hook install           # Install all hooks
-ods hook install pre-commit  # Pre-commit only
-```
+ODS does **not** rely on developer self-disclosure. It uses multiple independent signal sources:
 
-Installed hooks catch issues immediately in your terminal:
+| Signal | Source | Confidence |
+|---|---|---|
+| Commit trailers | `git log` parsing for `AI-assisted: true`, `AI-tool:` fields | 90% |
+| PR body | AI Disclosure checkbox/section in PR description | 85% |
+| Branch prefix | `ai-*` branch naming convention | 35-50% |
+| Diff heuristics | Comment-to-code ratio >35%, verbose variable names, redundant error handling, uniform indentation | 40% |
 
-- **pre-commit** — Validates branch naming
-- **commit-msg** — Validates commit message format
-- **pre-push** — Quick compliance check before pushing
-
-No more waiting for CI to tell you the branch name is wrong.
-
----
-
-## Policy Profiles
-
-ODS ships with three profiles. Select yours in `.ods.yaml`:
-
-| Profile | AI Disclosure | Ticket Required | Commit Scope | Use Case |
-|---|---|---|---|---|
-| `oss` | Optional | No | No | Open-source projects |
-| `enterprise` | Required | No | Yes | Teams adopting AI governance |
-| `regulated` | Required, strict | Yes | Yes | SOC2, HIPAA, FedRAMP |
-
-Enterprise and regulated profiles escalate AI disclosure to blocking errors.
-
----
-
-## AI Agent Integration
-
-ODS works with the tools your team already uses:
-
-- **Claude Code** — Reads `AGENTS.md` automatically for ODS instructions
-- **Cursor** — Reads `.cursor/rules/ods-compliance.mdc` for context
-- **GitHub Copilot** — PR template is automatically applied
-- **Pre-commit hooks** — Validates before AI-generated commits land
-
-`ods init` generates all of these files. AI agents become ODS-compliant by default.
+The weighted combination of these signals produces the final confidence score.
 
 ---
 
