@@ -27,7 +27,7 @@ Enterprises are adopting AI coding tools (Copilot, Cursor, Claude Code) at speed
 ## What ODS Does
 
 1. **Detect** — Which code is AI-generated? (without relying on developer self-disclosure)
-2. **Analyze** — What quality issues does the AI code have? (coming in v2)
+2. **Analyze** — What quality issues does the AI code have?
 3. **Score** — How much technical debt does this PR add? (coming in v2)
 4. **Enforce** — Block low-quality AI code from reaching production. (coming in v2)
 
@@ -72,6 +72,27 @@ ods detect --json
 2. PR description AI disclosure checkbox/section
 3. Branch name prefix (`ai-*`)
 4. Code diff heuristics (comment ratio, verbose naming, redundant error handling, uniform indentation)
+
+### AI Code Quality Analysis
+
+| Command | What it does |
+|---|---|
+| `ods analyze --file <path>` | Analyze a single file for AI code quality issues |
+| `ods analyze --dir <path>` | Analyze all code files in a directory |
+| `ods analyze` | Analyze git diff against HEAD~1 |
+| `ods analyze --ai-only` | Only analyze files detected as AI-generated |
+| `ods analyze --json` | Machine-readable JSON output |
+| `ods analyze --format detail` | Detailed per-issue report |
+
+**Analysis rules:**
+
+| Rule | What it detects | Severity |
+|---|---|---|
+| `ai-redundant-error-handling` | Dense clusters of if-err-nil blocks (AI over-defends) | medium |
+| `ai-over-commenting` | Comment-to-code ratio >40% (AI hallmark) | medium-high |
+| `ai-missing-edge-case` | Multiple if-statements without else branches | low |
+| `ai-unsafe-deserialization` | json.Unmarshal into interface{} without type checking | high |
+| `ai-inconsistent-pattern` | Mixed naming conventions and indentation styles | medium-low |
 
 ### Delivery Governance (legacy)
 

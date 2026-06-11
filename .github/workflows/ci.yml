@@ -277,6 +277,38 @@ jobs:
           - [x] This PR contains AI-generated code
           - **AI Tool:** GitHub Copilot" 2>/dev/null
 
+      # -- AI Code Quality Analysis --
+      - name: Analyze AI-like code
+        run: |
+          cat > /tmp/ai-test.go <<'GO'
+          // This function authenticates the user
+          // It validates credentials against the database
+          // Returns a session token on success
+          // The token expires after 24 hours
+          // We also log every auth attempt
+          func authenticate_user(creds interface{}) error {
+              var data interface{}
+              json.Unmarshal([]byte(`{"user":"test"}`), &data)
+              if err != nil {
+                  return err
+              }
+              if err != nil {
+                  return err
+              }
+              return nil
+          }
+          GO
+          ./ods analyze --file /tmp/ai-test.go --json | tee /dev/stderr
+
+      - name: Analyze safe code (no issues expected)
+        run: |
+          cat > /tmp/safe-test.go <<'GO'
+          package main
+          func add(a, b int) int { return a + b }
+          func sub(a, b int) int { return a - b }
+          GO
+          ./ods analyze --file /tmp/safe-test.go --json | tee /dev/stderr
+
       # -- Schema sync check --
       - name: Verify bundled schemas are valid JSON
         run: |
