@@ -7,7 +7,9 @@ policy:
   branch:
     allowed_types:
       - feature
+      - feat
       - bugfix
+      - fix
       - hotfix
       - release
       - chore
