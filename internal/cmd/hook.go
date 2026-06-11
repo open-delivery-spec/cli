@@ -14,36 +14,34 @@ import (
 var hookCmd = &cobra.Command{
 	Use:   "hook",
 	Short: "Install and manage git hooks",
-	Long: `Install ODS git hooks to validate compliance and detect AI code.
+	Long: `Install ODS git hooks for local AI code detection and quality checks.
 
 Supported hooks:
   install           Install all ODS hooks
   install pre-commit  Install only the pre-commit hook
 
 Examples:
-  ods hook install                      # Install all hooks
-  ods hook install pre-commit           # Install pre-commit only`,
+  ods hook install            # Install all hooks
+  ods hook install pre-commit # Install pre-commit only`,
 }
 
 var (
-	hookTarget string
-	hooksDir   string
+	hooksDir string
 )
 
 var hookInstallCmd = &cobra.Command{
 	Use:   "install [hook-name]",
 	Short: "Install ODS git hooks",
-	Long: `Install ODS git hooks for local AI code detection and quality checks.
+	Long: `Install ODS git hooks for local AI code detection and quality scoring.
 
 Installed hooks:
-  pre-commit         — Detect AI code + validate branch naming
-  commit-msg          — Validate commit message format
+  pre-commit         — Detect AI code before committing
   prepare-commit-msg  — Auto-detect AI tools and add AI-assisted footer
   pre-push            — Score tech debt before pushing
 
 Examples:
-  ods hook install               # Install all hooks
-  ods hook install pre-commit    # Install pre-commit only`,
+  ods hook install            # Install all hooks
+  ods hook install pre-commit # Install pre-commit only`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runHookInstall,
 }
@@ -76,7 +74,6 @@ func runHookInstall(cmd *cobra.Command, args []string) error {
 
 	hooks := map[string]string{
 		"pre-commit":         preCommitHook(odsPath),
-		"commit-msg":         commitMsgHook(odsPath),
 		"prepare-commit-msg": prepareCommitMsgHook(odsPath),
 		"pre-push":           prePushHook(odsPath),
 	}
@@ -99,7 +96,7 @@ func runHookInstall(cmd *cobra.Command, args []string) error {
 				return fmt.Errorf("backing up existing hook %s: %w", name, err)
 			}
 			fmt.Printf("  📦 Backed up existing %s → %s.ods-backup\n", name, name)
-			script = string(existing) + "\n# === ODS compliance check (added by ods hook install) ===\n" + script
+			script = string(existing) + "\n# === ODS (added by ods hook install) ===\n" + script
 		}
 
 		if err := os.WriteFile(hookPath, []byte(script), 0755); err != nil {
@@ -116,8 +113,6 @@ func runHookInstall(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 		fmt.Println("Hooks are now active:")
 		fmt.Println("  • AI code detection before commits")
-		fmt.Println("  • Branch naming validation")
-		fmt.Println("  • Commit message format validation")
 		fmt.Println("  • Auto AI-assisted footer for AI-generated commits")
 		fmt.Println("  • Tech debt score before pushing")
 	}
@@ -134,53 +129,13 @@ func shebang() string {
 
 func preCommitHook(odsPath string) string {
 	return fmt.Sprintf(`%s
-# ODS pre-commit hook — AI code detection + branch naming
+# ODS pre-commit hook — AI code detection
 # Installed by: ods hook install
-
-BRANCH=$(git branch --show-current)
-if [ -z "$BRANCH" ]; then
-    exit 0
-fi
 
 echo "🔍 ODS: Checking for AI-generated code..."
-if %s detect --diff-base HEAD 2>/dev/null | grep -q "AI code detected"; then
-    echo "🤖  AI-generated code detected in this commit"
-    echo "   Ensure you've reviewed all AI-generated changes"
-fi
+%s detect --diff-base HEAD 2>/dev/null
 
-echo "🔍 ODS: Validating branch name '$BRANCH'..."
-if ! %s validate branch "$BRANCH" 2>/dev/null; then
-    echo ""
-    echo "❌ ODS: Branch name '$BRANCH' is non-conformant."
-    echo "   Valid types: feature, bugfix, hotfix, release, chore"
-    exit 1
-fi
-echo "✅ ODS: Pre-commit checks passed"
-`, shebang(), odsPath, odsPath)
-}
-
-func commitMsgHook(odsPath string) string {
-	return fmt.Sprintf(`%s
-# ODS commit-msg hook — validates commit message format
-# Installed by: ods hook install
-
-COMMIT_MSG_FILE="$1"
-if [ ! -f "$COMMIT_MSG_FILE" ]; then
-    exit 0
-fi
-
-if grep -q '^Merge' "$COMMIT_MSG_FILE" 2>/dev/null; then
-    exit 0
-fi
-
-echo "🔍 ODS: Validating commit message..."
-if ! %s validate commit --file "$COMMIT_MSG_FILE" 2>/dev/null; then
-    echo ""
-    echo "❌ ODS: Commit message is non-conformant."
-    echo "   Format: <type>[scope]: <description>"
-    exit 1
-fi
-echo "✅ ODS: Commit message is conformant"
+echo "✅ ODS: Pre-commit check complete"
 `, shebang(), odsPath)
 }
 
@@ -209,7 +164,6 @@ fi
 
 # Check if any staged files look AI-generated
 if [ -z "$AI_TOOL" ]; then
-    # Quick heuristic: check for AI branch prefix
     BRANCH=$(git branch --show-current 2>/dev/null)
     if echo "$BRANCH" | grep -qi "^ai-\|/ai-"; then
         AI_TOOL="AI Assistant"
@@ -217,7 +171,6 @@ if [ -z "$AI_TOOL" ]; then
 fi
 
 if [ -n "$AI_TOOL" ]; then
-    # Only add if not already present
     if ! grep -qi "AI-assisted:" "$COMMIT_MSG_FILE" 2>/dev/null; then
         echo "" >> "$COMMIT_MSG_FILE"
         echo "AI-assisted: true" >> "$COMMIT_MSG_FILE"
@@ -230,7 +183,7 @@ fi
 
 func prePushHook(odsPath string) string {
 	return fmt.Sprintf(`%s
-# ODS pre-push hook — tech debt scoring before push
+# ODS pre-push hook — tech debt scoring
 # Installed by: ods hook install
 
 echo "🔍 ODS: Scoring technical debt impact..."

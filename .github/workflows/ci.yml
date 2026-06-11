@@ -7,259 +7,35 @@ on:
     types: [opened, synchronize, reopened]
 
 jobs:
-  # ── Build & Lint ──────────────────────────────────────────────
   build:
-    name: Build & Lint
+    name: Build & Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-
       - uses: actions/setup-go@v6
         with:
           go-version: "1.25"
-
       - name: Build
         run: go build ./...
-
-      - name: Lint
+      - name: Test
+        run: go test ./...
+      - name: Vet
         run: go vet ./...
 
-  # ── Dogfood: Validate our own deliverables ────────────────────
   dogfood:
-    name: Dogfood (validate our own artifacts)
+    name: Dogfood (test ODS on itself)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-
       - uses: actions/setup-go@v6
         with:
           go-version: "1.25"
-
       - name: Build ods CLI
         run: go build -o ods ./cmd/ods
 
-      # -- Branch naming --
-      - name: Validate branch naming (happy paths)
-        run: |
-          ./ods validate branch feature/add-oauth-login
-          ./ods validate branch bugfix/fix-null-pointer
-          ./ods validate branch hotfix/critical-memory-leak
-          ./ods validate branch release/v1.2.0
-          ./ods validate branch chore/update-deps
-          ./ods validate branch feat/add-login
-
-      - name: Validate branch naming (trunk branches)
-        run: |
-          ./ods validate branch main
-          ./ods validate branch master
-          ./ods validate branch develop
-
-      - name: Validate branch naming (reject invalid)
-        run: |
-          ! ./ods validate branch invalidBranch
-          ! ./ods validate branch feature/NO_CAPS
-          ! ./ods validate branch "bugfix/has spaces"
-          ! ./ods validate branch "feature/"
-
-      # -- Commit message --
-      - name: Validate commit messages (happy paths)
-        run: |
-          ./ods validate commit --stdin <<'MSG'
-          feat(api): add OAuth login
-
-          AI-assisted: false
-          MSG
-
-          ./ods validate commit --stdin <<'MSG'
-          fix: resolve null pointer crash
-
-          AI-assisted: true
-          AI-tool: GitHub Copilot
-          AI-review: pending
-          AI-confidence: high
-          MSG
-
-      - name: Validate commit messages (breaking change)
-        run: |
-          ./ods validate commit --stdin <<'MSG'
-          feat!: drop support for Node 16
-
-          BREAKING CHANGE: minimum Node version is now 18
-          MSG
-
-      - name: Validate commit messages (reject empty)
-        run: |
-          ! echo '' | ./ods validate commit --stdin
-
-      # -- PR description --
-      - name: Validate PR descriptions (happy path)
-        run: |
-          ./ods validate pr --stdin <<'BODY'
-          ## Summary
-          Add OAuth login
-
-          ## Type
-          - [x] Feature
-
-          ## AI Disclosure
-          This PR contains AI-generated code
-          AI Tool: GitHub Copilot
-
-          ## Changes
-          - Added OAuth flow
-
-          ## Testing
-          - [x] Unit tests added
-
-          ## Checklist
-          - [x] Branch naming follows ODS
-          BODY
-
-      - name: Validate PR descriptions (missing sections)
-        run: |
-          ! ./ods validate pr --stdin <<'BODY'
-          ## Summary
-          Just this
-          BODY
-
-      # -- Rollback plan --
-      - name: Validate rollback plan (happy path)
-        run: |
-          ./ods validate rollback --stdin <<'JSON'
-          {
-            "release_id": "v1.2.0",
-            "rollback_strategy": "feature_flag",
-            "steps": [
-              {"step": 1, "action": "disable_feature_flag", "description": "Turn off the flag", "verification": "Check /health returns 200"}
-            ],
-            "rollback_indicators": {"error_rate_threshold": ">1%"},
-            "data_rollback": {"database_migrations": false},
-            "communication_plan": {"notification_template": "Rolling back..."}
-          }
-          JSON
-
-      - name: Validate rollback plan (reject invalid)
-        run: |
-          ! echo 'not json' | ./ods validate rollback --stdin
-          ! echo '{"release_id": "v1"}' | ./ods validate rollback --stdin
-
-      # -- Evidence bundle --
-      - name: Validate evidence bundle (happy path)
-        run: |
-          ./ods validate evidence --stdin <<'JSON'
-          {
-            "bundle_id": "evt-001",
-            "release_id": "v1.2.0",
-            "environment": "production",
-            "deployed_at": "2026-05-24T10:00:00Z",
-            "evidence": {}
-          }
-          JSON
-
-      - name: Validate evidence bundle (reject invalid)
-        run: |
-          ! echo '{"bundle_id": "evt-001"}' | ./ods validate evidence --stdin
-
-      # -- Release readiness --
-      - name: Validate release readiness (happy path)
-        run: |
-          ./ods validate release --stdin <<'JSON'
-          {
-            "release_id": "v1.2.0",
-            "target_environment": "production",
-            "gates": {"ci": {"passed": true}},
-            "overall_score": 95
-          }
-          JSON
-
-      - name: Validate release readiness (low score warning)
-        run: |
-          ./ods validate release --stdin <<'JSON'
-          {
-            "release_id": "v1.2.0",
-            "target_environment": "production",
-            "gates": {"ci": {"passed": false}},
-            "overall_score": 45
-          }
-          JSON
-
-      # -- AI review record --
-      - name: Validate AI review record (happy path)
-        run: |
-          ./ods review validate --stdin <<'JSON'
-          {
-            "pr_number": 42,
-            "review_level": "L2",
-            "ai_contribution_percentage": 65,
-            "reviewer": "jane-doe",
-            "timestamp": "2026-05-24T10:00:00Z",
-            "outcome": "approved",
-            "checklist_results": {
-              "correctness": {"passed": true, "issues": 0},
-              "security": {"passed": true, "issues": 0},
-              "ai_specific": {"passed": true, "issues": 1},
-              "quality": {"passed": true, "issues": 0}
-            },
-            "issues_found": [
-              {"category": "ai_specific", "severity": "low", "description": "Hallucinated API parameter"}
-            ]
-          }
-          JSON
-
-      - name: Validate AI review record (L3 missing second_reviewer)
-        run: |
-          ! ./ods review validate --stdin <<'JSON'
-          {
-            "pr_number": 99,
-            "review_level": "L3",
-            "reviewer": "bob",
-            "timestamp": "2026-05-24T10:00:00Z",
-            "outcome": "approved",
-            "checklist_results": {
-              "correctness": {"passed": true, "issues": 0},
-              "security": {"passed": true, "issues": 0},
-              "ai_specific": {"passed": true, "issues": 0},
-              "quality": {"passed": true, "issues": 0}
-            }
-          }
-          JSON
-
-      - name: Validate AI review record (reject invalid JSON)
-        run: |
-          ! echo 'not json' | ./ods review validate --stdin
-
-      # -- Approval policy --
-      - name: Validate approval policy (happy path)
-        run: |
-          ./ods validate approval-policy --stdin <<'JSON'
-          {
-            "policy_id": "default",
-            "version": "1.0.0",
-            "rules": [{"type": "approval", "min_approvals": 2}],
-            "roles": ["tech-lead", "security-reviewer"]
-          }
-          JSON
-
-      - name: Validate approval policy (reject empty rules)
-        run: |
-          ! echo '{"policy_id": "default", "version": "1.0.0", "rules": [], "roles": []}' | ./ods validate approval-policy --stdin
-
-      # -- Strict mode --
-      - name: Strict mode smoke test
-        run: |
-          ./ods validate commit --stdin --strict <<'MSG'
-          feat(auth): add login
-
-          AI-assisted: true
-          AI-tool: Copilot
-          AI-review: pending
-          AI-confidence: medium
-          MSG
-
-      # -- AI Code Detection --
+      # ── AI Code Detection ──
       - name: Detect AI code (branch)
-        run: |
-          ./ods detect --branch feature/ai-oauth --json | tee /dev/stderr
+        run: ./ods detect --branch feature/ai-oauth --json | tee /dev/stderr
 
       - name: Detect AI code (PR body)
         run: |
@@ -267,9 +43,8 @@ jobs:
           - [x] This PR contains AI-generated code
           - **AI Tool:** GitHub Copilot" --json | tee /dev/stderr
 
-      - name: Detect AI code (no AI, clean branch)
-        run: |
-          ./ods detect --branch feature/add-login --json | tee /dev/stderr
+      - name: Detect AI code (no AI)
+        run: ./ods detect --branch feature/add-login --json | tee /dev/stderr
 
       - name: Detect AI code (high confidence block)
         run: |
@@ -277,72 +52,35 @@ jobs:
           - [x] This PR contains AI-generated code
           - **AI Tool:** GitHub Copilot" 2>/dev/null
 
-      # -- AI Code Quality Analysis --
+      # ── AI Code Quality Analysis ──
       - name: Analyze AI-like code
         run: |
           cat > /tmp/ai-test.go <<'GO'
           // This function authenticates the user
           // It validates credentials against the database
           // Returns a session token on success
-          // The token expires after 24 hours
-          // We also log every auth attempt
           func authenticate_user(creds interface{}) error {
               var data interface{}
-              json.Unmarshal([]byte(`{"user":"test"}`), &data)
-              if err != nil {
-                  return err
-              }
-              if err != nil {
-                  return err
-              }
+              json.Unmarshal([]byte("{}"), &data)
+              if err != nil { return err }
+              if err != nil { return err }
               return nil
           }
           GO
           ./ods analyze --file /tmp/ai-test.go --json | tee /dev/stderr
 
-      - name: Analyze safe code (no issues expected)
+      - name: Analyze safe code
         run: |
           cat > /tmp/safe-test.go <<'GO'
           package main
           func add(a, b int) int { return a + b }
-          func sub(a, b int) int { return a - b }
           GO
           ./ods analyze --file /tmp/safe-test.go --json | tee /dev/stderr
 
-      # -- Technical Debt Scoring --
+      # ── Technical Debt Scoring ──
       - name: Score tech debt
-        run: |
-          ./ods score --json | tee /dev/stderr
+        run: ./ods score --json | tee /dev/stderr
 
-      # -- OPA Policy Check --
-      - name: OPA policy check (default)
-        run: |
-          ./ods check --json | tee /dev/stderr
-
-      # -- Schema sync check --
-      - name: Verify bundled schemas are valid JSON
-        run: |
-          for f in internal/validator/schemas/*.json; do
-            echo "  Checking $f..."
-            python3 -m json.tool "$f" > /dev/null
-          done
-
-  # ── Dogfood with published GitHub Action (disabled until released) ─
-  self-validate:
-    name: Eat Our Own Dogfood (GitHub Action)
-    runs-on: ubuntu-latest
-    if: false
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Branch naming check
-        uses: open-delivery-spec/validate-action@v1
-        with:
-          check: branch-naming
-          branch_name: "${{ github.head_ref }}"
-
-      - name: Commit message check
-        uses: open-delivery-spec/validate-action@v1
-        with:
-          check: commit-message
-          commit_message: "${{ github.event.head_commit.message }}"
+      # ── OPA Policy Check ──
+      - name: OPA policy check
+        run: ./ods check --json | tee /dev/stderr

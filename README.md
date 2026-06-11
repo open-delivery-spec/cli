@@ -56,7 +56,7 @@ ods detect --json
 
 ## Command Reference
 
-### AI Code Detection (primary)
+### AI Code Detection
 
 | Command | What it does |
 |---|---|
@@ -136,57 +136,35 @@ deny[msg] {
 }
 ```
 
-### Delivery Governance (legacy)
+### Git Hooks
 
 | Command | What it does |
 |---|---|
-| `ods validate branch <name>` | Validate branch naming |
-| `ods validate commit --file <path>` | Validate commit message format |
-| `ods validate pr --file <path>` | Validate PR description structure |
-| `ods report` | Generate compliance report (terminal, JSON, HTML, SARIF, Markdown) |
-| `ods init` | Scaffold ODS config, PR template, CI workflows |
-| `ods hook install` | Install pre-commit, commit-msg hooks |
-| `ods ci parse --file ci.log` | Parse CI failures for AI hallucination patterns |
-| `ods review generate --pr <n> --level L2` | Generate AI change review record |
+| `ods hook install` | Install pre-commit, prepare-commit-msg, pre-push hooks |
+| `ods init` | Scaffold CI workflow, AGENTS.md, Cursor rules |
 
 ---
 
 ## Detection Examples
 
-### High-confidence detection (PR body + commit trailer)
-
 ```bash
+# High-confidence detection via PR body
 $ ods detect --pr-body "$(cat pr.md)"
 🤖  AI code detected (confidence: 85%)
    Sources: pr-body
    Evidence:
      • [pr-body] AI disclosure checkbox is checked (85%)
-```
 
-### Branch-level detection only
-
-```bash
+# Branch-level detection
 $ ods detect --branch feature/ai-oauth
 🤖  AI code detected (confidence: 35%)
    Sources: branch-name
    Evidence:
      • [branch-name] Branch 'feature/ai-oauth' has AI-prefixed segment (35%)
-```
 
-### No AI detected
-
-```bash
+# No AI detected
 $ ods detect --branch feature/add-login
 👤  No AI code detected (confidence: 0%)
-```
-
-### CI integration (block AI code in CI)
-
-```yaml
-# .github/workflows/ods.yml
-- name: Detect AI code
-  run: ods detect --json
-  # Exits non-zero if AI code detected with ≥80% confidence
 ```
 
 ---
@@ -203,16 +181,6 @@ ODS does **not** rely on developer self-disclosure. It uses multiple independent
 | Diff heuristics | Comment-to-code ratio >35%, verbose variable names, redundant error handling, uniform indentation | 40% |
 
 The weighted combination of these signals produces the final confidence score.
-
----
-
-## Configuration
-
-ODS CLI looks for configuration in:
-
-1. `.ods.yaml` (repository root)
-2. `~/.config/ods/config.yaml` (user home)
-3. Environment variables (`ODS_*`)
 
 ---
 
