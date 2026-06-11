@@ -256,6 +256,27 @@ jobs:
           AI-confidence: medium
           MSG
 
+      # -- AI Code Detection --
+      - name: Detect AI code (branch)
+        run: |
+          ./ods detect --branch feature/ai-oauth --json | tee /dev/stderr
+
+      - name: Detect AI code (PR body)
+        run: |
+          ./ods detect --pr-body "## AI Disclosure
+          - [x] This PR contains AI-generated code
+          - **AI Tool:** GitHub Copilot" --json | tee /dev/stderr
+
+      - name: Detect AI code (no AI, clean branch)
+        run: |
+          ./ods detect --branch feature/add-login --json | tee /dev/stderr
+
+      - name: Detect AI code (high confidence block)
+        run: |
+          ! ./ods detect --pr-body "## AI Disclosure
+          - [x] This PR contains AI-generated code
+          - **AI Tool:** GitHub Copilot" --branch feature/ai-oauth 2>/dev/null
+
       # -- Schema sync check --
       - name: Verify bundled schemas are valid JSON
         run: |
