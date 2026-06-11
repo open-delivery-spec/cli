@@ -275,7 +275,7 @@ jobs:
         run: |
           ! ./ods detect --pr-body "## AI Disclosure
           - [x] This PR contains AI-generated code
-          - **AI Tool:** GitHub Copilot" --branch feature/ai-oauth 2>/dev/null
+          - **AI Tool:** GitHub Copilot" 2>/dev/null
 
       # -- Schema sync check --
       - name: Verify bundled schemas are valid JSON
