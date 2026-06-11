@@ -309,6 +309,16 @@ jobs:
           GO
           ./ods analyze --file /tmp/safe-test.go --json | tee /dev/stderr
 
+      # -- Technical Debt Scoring --
+      - name: Score tech debt
+        run: |
+          ./ods score --json | tee /dev/stderr
+
+      # -- OPA Policy Check --
+      - name: OPA policy check (default)
+        run: |
+          ./ods check --json | tee /dev/stderr
+
       # -- Schema sync check --
       - name: Verify bundled schemas are valid JSON
         run: |

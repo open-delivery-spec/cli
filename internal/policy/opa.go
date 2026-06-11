@@ -74,10 +74,10 @@ func Evaluate(policyPath string, input *EvalInput) (*EvalResult, error) {
 	ctx := context.Background()
 
 	// Build query for deny, warn, and allow rules
+	// OPA v1 requires a variable binding in the query (e.g., "x = data.ods.policy")
 	query, err := rego.New(
-		rego.Query("data.ods.policy"),
+		rego.Query("result = data.ods.policy"),
 		rego.Module("policy.rego", string(data)),
-		rego.Input(inputMap),
 	).PrepareForEval(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("preparing policy: %w", err)
@@ -99,28 +99,46 @@ func parseRegoResults(results rego.ResultSet) (*EvalResult, error) {
 		return out, nil
 	}
 
-	result := results[0]
-	bindings := result.Bindings
+	// The query is "result = data.ods.policy" — look for "result" key
+	var policyMap map[string]interface{}
 
-	// Check if the result is the full `ods.policy` object
-	if policyObj, ok := bindings["data"].(map[string]interface{}); ok {
-		if odsObj, ok := policyObj["ods"].(map[string]interface{}); ok {
-			if policyMap, ok := odsObj["policy"].(map[string]interface{}); ok {
-				// Extract deny
-				if denyRaw, ok := policyMap["deny"]; ok {
-					out.Denials = extractStringList(denyRaw)
-				}
-				// Extract warn
-				if warnRaw, ok := policyMap["warn"]; ok {
-					out.Warnings = extractStringList(warnRaw)
-				}
-				// Extract allow
-				if allowRaw, ok := policyMap["allow"]; ok {
-					if allowBool, ok := allowRaw.(bool); ok {
-						out.Allowed = allowBool
-					}
-				}
+	for _, key := range []string{"result", "x", "data.ods.policy"} {
+		if raw, ok := results[0].Bindings[key]; ok {
+			if m, ok := raw.(map[string]interface{}); ok {
+				policyMap = m
+				break
 			}
+		}
+	}
+
+	// Fallback: try any map value in bindings
+	if policyMap == nil {
+		for _, v := range results[0].Bindings {
+			if m, ok := v.(map[string]interface{}); ok {
+				policyMap = m
+				break
+			}
+		}
+	}
+
+	if policyMap == nil {
+		return out, nil
+	}
+
+	// Extract deny
+	if denyRaw, ok := policyMap["deny"]; ok {
+		out.Denials = extractStringList(denyRaw)
+	}
+
+	// Extract warn
+	if warnRaw, ok := policyMap["warn"]; ok {
+		out.Warnings = extractStringList(warnRaw)
+	}
+
+	// Extract allow
+	if allowRaw, ok := policyMap["allow"]; ok {
+		if allowBool, ok := allowRaw.(bool); ok {
+			out.Allowed = allowBool
 		}
 	}
 
