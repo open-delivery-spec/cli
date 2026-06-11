@@ -176,7 +176,7 @@ var checksExplainCmd = &cobra.Command{
 				msg += fmt.Sprintf("\nDid you mean: %s?", strings.Join(suggestions, ", "))
 			}
 			msg += "\nUse 'ods checks list' to see all available checks."
-			return fmt.Errorf(msg)
+			return fmt.Errorf("%s", msg)
 		}
 
 		fmt.Printf("Check: %s (%s)\n", doc.Name, doc.ID)
