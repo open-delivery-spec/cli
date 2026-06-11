@@ -3,7 +3,7 @@
 > **Detect AI-generated code, analyze its quality, and prevent technical debt — before it reaches production.**
 
 [![CI](https://github.com/open-delivery-spec/cli/actions/workflows/ci.yml/badge.svg)](https://github.com/open-delivery-spec/cli/actions/workflows/ci.yml)
-[![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go)](https://go.dev)
+[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 ---
@@ -28,8 +28,8 @@ Enterprises are adopting AI coding tools (Copilot, Cursor, Claude Code) at speed
 
 1. **Detect** — Which code is AI-generated? (without relying on developer self-disclosure)
 2. **Analyze** — What quality issues does the AI code have?
-3. **Score** — How much technical debt does this PR add? (coming in v2)
-4. **Enforce** — Block low-quality AI code from reaching production. (coming in v2)
+3. **Score** — How much technical debt does this PR add?
+4. **Enforce** — Block low-quality AI code from reaching production.
 
 ---
 
@@ -94,6 +94,48 @@ ods detect --json
 | `ai-unsafe-deserialization` | json.Unmarshal into interface{} without type checking | high |
 | `ai-inconsistent-pattern` | Mixed naming conventions and indentation styles | medium-low |
 
+### Technical Debt Scoring
+
+| Command | What it does |
+|---|---|
+| `ods score` | Score technical debt delta for the current diff |
+| `ods score --json` | Machine-readable JSON output |
+| `ods score --format detail` | Detailed breakdown of all 5 dimensions |
+
+**Scoring dimensions:**
+
+| Dimension | Weight |
+|---|---|
+| AI code ratio | 3.0 |
+| Defect density (issues/KLOC) | 2.0 |
+| Critical issues | 1.5 each |
+| Test coverage gap | 1.0 |
+| Code duplication rate | 1.0 |
+
+Verdict: **decrease** / **neutral** / **increase**
+
+### Enterprise Policy Enforcement
+
+| Command | What it does |
+|---|---|
+| `ods check` | Evaluate OPA Rego policy against the current change |
+| `ods check --policy <path>` | Use a custom Rego policy file |
+| `ods check --json` | Machine-readable JSON output |
+
+Place your policy at `.ods/policy.rego`:
+
+```rego
+package ods.policy
+
+default allow := true
+
+deny[msg] {
+    input.ai_confidence > 0.8
+    input.test_coverage < 0.3
+    msg = "AI code with low test coverage"
+}
+```
+
 ### Delivery Governance (legacy)
 
 | Command | What it does |
@@ -125,7 +167,7 @@ $ ods detect --pr-body "$(cat pr.md)"
 
 ```bash
 $ ods detect --branch feature/ai-oauth
-🤖  AI code detected in 0 file(s) — 0/0 lines (confidence: 50%)
+🤖  AI code detected (confidence: 35%)
    Sources: branch-name
    Evidence:
      • [branch-name] Branch 'feature/ai-oauth' has AI-prefixed segment (35%)

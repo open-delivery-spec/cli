@@ -47,7 +47,7 @@ warn[msg] {
 
 # Rule 6: Warn when AI code touches multiple sensitive modules
 warn[msg] {
-    files := {f.path | input.ai_files[_].path; regex.match(".*(auth|payment|billing|security).*", f.path)}
-    count(files) > 1
-    msg = sprintf("AI code touches %d sensitive modules — consider splitting into separate PRs", [count(files)])
+    paths := {path | file := input.ai_files[_]; path := file.path; regex.match(".*(auth|payment|billing|security).*", path)}
+    count(paths) > 1
+    msg = sprintf("AI code touches %d sensitive modules — consider splitting into separate PRs", [count(paths)])
 }

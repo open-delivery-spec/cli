@@ -153,6 +153,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 
 	if !result.Allowed {
+		cmd.SilenceUsage = true
 		return fmt.Errorf("policy denied: %d denial(s)", len(result.Denials))
 	}
 	return nil

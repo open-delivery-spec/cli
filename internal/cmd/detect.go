@@ -119,6 +119,7 @@ func runDetect(cmd *cobra.Command, args []string) error {
 
 	// Exit non-zero if AI code detected with high confidence
 	if result.AIGenerated && result.Confidence >= 0.8 {
+		cmd.SilenceUsage = true
 		return fmt.Errorf("AI-generated code detected with high confidence (%.0f%%)", result.Confidence*100)
 	}
 	return nil
