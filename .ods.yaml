@@ -39,7 +39,7 @@ policy:
       - ci
       - chore
       - revert
-    require_scope: true
+    require_scope: false
     max_subject_length: 72
 
   ai_disclosure:
