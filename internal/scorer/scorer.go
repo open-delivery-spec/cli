@@ -86,15 +86,8 @@ func Score(opts Options) *ScoreResult {
 	delta += br.AICodeRatio * 3.0      // AI code weight: 3 (highest concern)
 	delta += br.DefectDensity * 2.0    // Defects weight: 2
 	delta += float64(br.CriticalIssues) * 1.5 // Critical issues: 1.5 each
-
-	// Only apply test coverage and duplication penalties when AI code is
-	// detected or quality issues exist. For human-written PRs with no issues,
-	// these metrics are not meaningful and would produce misleading verdicts.
-	hasAIOrIssues := br.AICodeRatio > 0 || br.DefectDensity > 0 || br.CriticalIssues > 0
-	if hasAIOrIssues {
-		delta += (1.0 - br.TestCoverage) * 1.0  // Low coverage: up to 1.0 penalty
-		delta += br.DuplicationRate * 1.0  // Duplication: 1.0
-	}
+	delta += (1.0 - br.TestCoverage) * 1.0  // Low coverage: up to 1.0 penalty
+	delta += br.DuplicationRate * 1.0  // Duplication: 1.0
 	result.TechnicalDebtDelta = delta
 
 	// Verdict

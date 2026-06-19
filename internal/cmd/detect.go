@@ -85,8 +85,11 @@ func runDetect(cmd *cobra.Command, args []string) error {
 	}
 
 	// Branch name from flag, env, or auto-detect from git
+	// Checks ODS_BRANCH first (used by validate-action), then ODS_BRANCH_NAME, then GITHUB_HEAD_REF
 	if detectBranch != "" {
 		opts.BranchName = detectBranch
+	} else if branch := readEnvStr("ODS_BRANCH"); branch != "" {
+		opts.BranchName = branch
 	} else if branch := readEnvStr("ODS_BRANCH_NAME"); branch != "" {
 		opts.BranchName = branch
 	} else if branch := readEnvStr("GITHUB_HEAD_REF"); branch != "" {
