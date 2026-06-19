@@ -65,7 +65,10 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	detectOpts := detector.Options{DiffBase: "HEAD~1", MaxCommits: 10}
 	branch := detectBranch
 	if branch == "" {
-		// try env
+		// try env (check both names for compatibility)
+		branch = os.Getenv("ODS_BRANCH")
+	}
+	if branch == "" {
 		branch = os.Getenv("ODS_BRANCH_NAME")
 	}
 	if branch != "" {
@@ -100,6 +103,12 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		TotalChangedLines: totalLines,
 	})
 
+	// Build list of changed file paths
+	var changedFiles []string
+	for f := range diffFiles {
+		changedFiles = append(changedFiles, f)
+	}
+
 	// Build policy input
 	evalInput := &policy.EvalInput{
 		AIGenerated:        detectResult.AIGenerated,
@@ -107,6 +116,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		TechnicalDebtDelta: scoreResult.TechnicalDebtDelta,
 		TestCoverage:       scoreResult.Breakdown.TestCoverage,
 		Branch:             detectOpts.BranchName,
+		ChangedFiles:       changedFiles,
 	}
 
 	for _, f := range detectResult.Files {
