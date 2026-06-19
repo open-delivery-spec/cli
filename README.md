@@ -10,7 +10,9 @@
 
 ## The Problem
 
-Enterprises are adopting AI coding tools (Copilot, Cursor, Claude Code) at speed — but AI-generated code increases technical debt in predictable ways:
+A PR arrives: 8 commits, 6 written by Copilot, 2 by a human. The branch says `feature/add-sarif-output`. But two changed files touch the authentication module — nothing to do with SARIF. The reviewer doesn't know. The merge happens. A bug ships.
+
+This is the new reality of AI-assisted development. AI code increases technical debt in predictable ways:
 
 | AI Failure Mode | Real-world impact |
 |---|---|
@@ -19,17 +21,9 @@ Enterprises are adopting AI coding tools (Copilot, Cursor, Claude Code) at speed
 | **Over-commenting** | AI writes 35%+ comment-to-code ratio with self-explanatory comments |
 | **No test coverage** | AI PRs average 22% test coverage vs 68% for human PRs |
 | **Invisible AI code** | Teams can't distinguish AI-generated from human-written changes |
+| **Scope drift** | AI changes files unrelated to the stated feature |
 
-**ODS is the CI gate that detects AI code, analyzes its quality, and blocks low-quality AI changes before they create technical debt.**
-
----
-
-## What ODS Does
-
-1. **Detect** — Which code is AI-generated? (without relying on developer self-disclosure)
-2. **Analyze** — What quality issues does the AI code have?
-3. **Score** — How much technical debt does this PR add?
-4. **Enforce** — Block low-quality AI code from reaching production.
+**ODS is the CI gate that detects AI code, analyzes its quality, scores technical debt impact, and enforces enterprise policy — on every pull request.**
 
 ---
 
@@ -39,148 +33,238 @@ Enterprises are adopting AI coding tools (Copilot, Cursor, Claude Code) at speed
 # Install
 go install github.com/open-delivery-spec/cli/cmd/ods@latest
 
-# Detect AI code in the current branch
-ods detect
+# Detect AI code in a PR
+ods detect --diff-base origin/main --branch feature/my-feature
 
-# Detect against a specific base
-ods detect --diff-base origin/main
+# Analyze code quality
+ods analyze --json
 
-# Detect with explicit PR context
-ods detect --branch feature/ai-auth --pr-body "$(cat PR_BODY.md)"
+# Score technical debt
+ods score
 
-# JSON output for CI pipelines
-ods detect --json
+# Enforce policy
+ods check
 ```
 
 ---
 
-## Command Reference
+## Command Reference with Real Output
 
-### AI Code Detection
+### `ods detect` — AI Code Detection
 
-| Command | What it does |
-|---|---|
-| `ods detect` | Detect AI-generated code using commit trailers, branch names, PR disclosure, and diff heuristics |
-| `ods detect --json` | Machine-readable JSON output for CI pipelines |
-| `ods detect --format detail` | Detailed file-level AI detection report |
-| `ods detect --diff-base origin/main` | Detect AI code in PR diff against main |
-| `ods detect --pr-body "..."` | Include PR body in detection |
-| `ods detect --commits 20` | Scan last 20 commits for AI markers |
-
-**Detection signals (in order of confidence):**
-1. Git commit trailers (`AI-assisted: true`, `AI-tool: name`)
-2. PR description AI disclosure checkbox/section
-3. Branch name prefix (`ai-*`)
-4. Code diff heuristics (comment ratio, verbose naming, redundant error handling, uniform indentation)
-
-### AI Code Quality Analysis
-
-| Command | What it does |
-|---|---|
-| `ods analyze --file <path>` | Analyze a single file for AI code quality issues |
-| `ods analyze --dir <path>` | Analyze all code files in a directory |
-| `ods analyze` | Analyze git diff against HEAD~1 |
-| `ods analyze --ai-only` | Only analyze files detected as AI-generated |
-| `ods analyze --json` | Machine-readable JSON output |
-| `ods analyze --format detail` | Detailed per-issue report |
-
-**Analysis rules:**
-
-| Rule | What it detects | Severity |
-|---|---|---|
-| `ai-redundant-error-handling` | Dense clusters of if-err-nil blocks (AI over-defends) | medium |
-| `ai-over-commenting` | Comment-to-code ratio >40% (AI hallmark) | medium-high |
-| `ai-missing-edge-case` | Multiple if-statements without else branches | low |
-| `ai-unsafe-deserialization` | json.Unmarshal into interface{} without type checking | high |
-| `ai-inconsistent-pattern` | Mixed naming conventions and indentation styles | medium-low |
-
-### Technical Debt Scoring
-
-| Command | What it does |
-|---|---|
-| `ods score` | Score technical debt delta for the current diff |
-| `ods score --json` | Machine-readable JSON output |
-| `ods score --format detail` | Detailed breakdown of all 5 dimensions |
-
-**Scoring dimensions:**
-
-| Dimension | Weight |
-|---|---|
-| AI code ratio | 3.0 |
-| Defect density (issues/KLOC) | 2.0 |
-| Critical issues | 1.5 each |
-| Test coverage gap | 1.0 |
-| Code duplication rate | 1.0 |
-
-Verdict: **decrease** / **neutral** / **increase**
-
-### Enterprise Policy Enforcement
-
-| Command | What it does |
-|---|---|
-| `ods check` | Evaluate OPA Rego policy against the current change |
-| `ods check --policy <path>` | Use a custom Rego policy file |
-| `ods check --json` | Machine-readable JSON output |
-
-Place your policy at `.ods/policy.rego`:
-
-```rego
-package ods.policy
-
-default allow := true
-
-deny[msg] {
-    input.ai_confidence > 0.8
-    input.test_coverage < 0.3
-    msg = "AI code with low test coverage"
-}
-```
-
-### Git Hooks
-
-| Command | What it does |
-|---|---|
-| `ods hook install` | Install pre-commit, prepare-commit-msg, pre-push hooks |
-| `ods init` | Scaffold CI workflow, AGENTS.md, Cursor rules |
-
----
-
-## Detection Examples
+Detects AI-generated code using commit trailers, branch names, PR disclosure, and diff heuristics.
 
 ```bash
-# High-confidence detection via PR body
-$ ods detect --pr-body "$(cat pr.md)"
-🤖  AI code detected (confidence: 85%)
+$ ods detect --diff-base origin/main --branch feature/ai-oauth
+🤖  AI code detected — 85% confidence (PR shows AI disclosure)
    Sources: pr-body
    Evidence:
      • [pr-body] AI disclosure checkbox is checked (85%)
+```
 
-# Branch-level detection
-$ ods detect --branch feature/ai-oauth
-🤖  AI code detected (confidence: 35%)
-   Sources: branch-name
-   Evidence:
-     • [branch-name] Branch 'feature/ai-oauth' has AI-prefixed segment (35%)
+```bash
+$ ods detect --diff-base origin/main --branch feature/add-login
+👤  No AI code detected (0% confidence)
+```
 
-# No AI detected
-$ ods detect --branch feature/add-login
-👤  No AI code detected (confidence: 0%)
+JSON output for CI pipelines:
+
+```bash
+$ ods detect --diff-base origin/main --json
+{
+  "ai_generated": true,
+  "confidence": 0.85,
+  "summary": "AI code detected — 85% confidence (PR shows AI disclosure)",
+  "sources": ["pr-body"],
+  "evidence": [
+    {
+      "source": "pr-body",
+      "value": "AI disclosure checkbox is checked",
+      "confidence": 0.85
+    }
+  ],
+  "files": [
+    {
+      "path": "internal/scanner/sarif.go",
+      "ai_lines": 180,
+      "total_lines": 195,
+      "confidence": 0.92
+    }
+  ]
+}
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--diff-base` | `HEAD~1` | Git ref to diff against |
+| `--branch` | auto | Branch name |
+| `--pr-body` | — | PR description body text |
+| `--pr-file` | — | File containing PR body |
+| `--commits` | `10` | Max commits to scan |
+| `--json` | `false` | JSON output |
+| `--format` | `summary` | Output format: `summary`, `detail`, `json` |
+
+### `ods analyze` — AI Code Quality Analysis
+
+```bash
+$ ods analyze --file internal/scanner/sarif.go --json
+{
+  "issues": [
+    {
+      "file": "internal/scanner/sarif.go",
+      "line": 42,
+      "rule": "ai-over-commenting",
+      "severity": "medium",
+      "message": "Comment-to-code ratio is 47% — exceeds 40% threshold",
+      "suggestion": "Remove self-explanatory inline comments; keep only public API docstrings"
+    },
+    {
+      "file": "internal/scanner/sarif.go",
+      "line": 88,
+      "rule": "ai-inconsistent-pattern",
+      "severity": "low",
+      "message": "Mixed error wrapping patterns in the same function",
+      "suggestion": "Standardize on fmt.Errorf for all error wrapping"
+    }
+  ],
+  "total_lines": 195,
+  "summary": "2 quality issues found (0 critical, 0 high, 1 medium, 1 low)"
+}
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--file`, `-f` | — | Analyze a single file |
+| `--dir`, `-d` | — | Analyze a directory (recursively) |
+| `--ai-only` | `false` | Only files detected as AI-generated |
+| `--json` | `false` | JSON output |
+| `--format` | `summary` | Output format: `summary`, `detail`, `json` |
+
+### `ods score` — Technical Debt Impact
+
+```bash
+$ ods score
+⚠️  Technical Debt Score
+   +4.2 (increase)
+   Verdict: increase (Moderate risk: review recommended, ensure adequate tests)
+```
+
+```bash
+$ ods score --json
+{
+  "technical_debt_delta": 4.2,
+  "verdict": "increase",
+  "recommendation": "Moderate risk: review recommended, ensure adequate tests",
+  "breakdown": {
+    "ai_code_ratio": 0.75,
+    "defect_density": 1.2,
+    "critical_issues": 0,
+    "test_coverage": 0.3,
+    "duplication_rate": 0.1
+  }
+}
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--json` | `false` | JSON output |
+| `--format` | `summary` | Output format: `summary`, `detail`, `json` |
+| `--test-dir` | — | Test directory path (auto-detected) |
+
+### `ods check` — Enterprise Policy Enforcement
+
+```bash
+$ ods check
+✅  Policy check passed
+   Policy: .ods/policy.rego
+```
+
+```bash
+$ ods check --json
+{
+  "allowed": false,
+  "denials": ["AI code with low test coverage"],
+  "warnings": ["High-confidence AI code with multiple quality issues"]
+}
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--policy`, `-p` | `.ods/policy.rego` | Path to Rego policy file |
+| `--json` | `false` | JSON output |
+
+### `ods hook install` — Git Hooks
+
+```bash
+$ ods hook install
+✅  pre-commit hook installed at .git/hooks/pre-commit
+✅  prepare-commit-msg hook installed at .git/hooks/prepare-commit-msg
+✅  pre-push hook installed at .git/hooks/pre-push
+```
+
+### `ods init` — Project Scaffolding
+
+```bash
+$ ods init
+✅  Created .github/workflows/ods-ai-quality.yml
+✅  Created AGENTS.md (agent instructions for AI coding assistants)
+✅  Created .cursor/rules/gov-001-ods-compliance.mdc (Cursor rules)
+✅  Created .ods/policy.rego (default enterprise policy)
 ```
 
 ---
 
-## How Detection Works
+## Installation and CI Integration
 
-ODS does **not** rely on developer self-disclosure. It uses multiple independent signal sources:
+### Install
 
-| Signal | Source | Confidence |
-|---|---|---|
-| Commit trailers | `git log` parsing for `AI-assisted: true`, `AI-tool:` fields | 90% |
-| PR body | AI Disclosure checkbox/section in PR description | 85% |
-| Branch prefix | `ai-*` branch naming convention | 35-50% |
-| Diff heuristics | Comment-to-code ratio >35%, verbose variable names, redundant error handling, uniform indentation | 40% |
+```bash
+go install github.com/open-delivery-spec/cli/cmd/ods@latest
+```
 
-The weighted combination of these signals produces the final confidence score.
+Requires Go 1.25+.
+
+### GitHub Actions (Recommended)
+
+Use the one-step [validate-action](https://github.com/open-delivery-spec/validate-action):
+
+```yaml
+name: ODS AI Code Quality
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  ods:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: open-delivery-spec/validate-action@v2
+```
+
+Or use individual CLI steps:
+
+```yaml
+- name: Detect AI code
+  run: ods detect --diff-base origin/main --branch ${{ github.head_ref }} --json
+
+- name: Analyze quality
+  run: ods analyze --json
+
+- name: Score tech debt
+  run: ods score --json
+
+- name: Enforce policy
+  run: ods check --json
+```
+
+### See Also
+
+- [Module 04 End-to-End Example](https://github.com/open-delivery-spec/spec/tree/main/examples/module-04-ai-change-review) — Realistic L1/L2/L3 review scenario with scope drift detection
+- [validate-action README](https://github.com/open-delivery-spec/validate-action) — GitHub Action documentation
+- [Spec documentation](https://github.com/open-delivery-spec/spec) — Full specification and design principles
 
 ---
 

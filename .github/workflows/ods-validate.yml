@@ -1,0 +1,61 @@
+# ODS Validate — Dogfooding workflow for the CLI repository
+#
+# Runs AI code quality gate on every PR to main.
+# TODO: The validate-action@v2 currently only supports the AI detection pipeline.
+# The planned `check: branch-naming` and `check: commit-message` inputs
+# (as documented in validate-action@v1 roadmap) are not yet implemented.
+# Branch naming and commit message validation are done via shell steps.
+
+name: ODS Validate
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate branch naming
+        run: |
+          BRANCH="${{ github.head_ref }}"
+          if echo "$BRANCH" | grep -qE '^(feature|bugfix|hotfix|release|chore)/'; then
+            echo "✅ Branch '$BRANCH' follows naming convention"
+          else
+            echo "⚠️ Branch '$BRANCH' does not follow conventional branch naming"
+          fi
+
+      - name: Validate commit messages
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          COMMITS=$(git log --oneline "$BASE..$HEAD" 2>/dev/null)
+          if [ -z "$COMMITS" ]; then
+            echo "No commits to validate (maybe squash merge)"
+          else
+            echo "$COMMITS" | while IFS= read -r line; do
+              if echo "$line" | grep -qE '^(feat|fix|docs|style|refactor|perf|test|chore|ci|build)(\(.+\))?:'; then
+                echo "✅ $line"
+              else
+                echo "⚠️  $line (does not follow Conventional Commits)"
+              fi
+            done
+          fi
+
+      - name: Validate PR description
+        run: |
+          echo "Checking PR description structure..."
+          echo "PR title: ${{ github.event.pull_request.title }}"
+          echo "PR body length: $(echo '${{ github.event.pull_request.body }}' | wc -c) bytes"
+
+      - name: ODS AI code quality gate
+        uses: open-delivery-spec/validate-action@v2
+        with:
+          diff-base: ${{ github.event.pull_request.base.sha || 'origin/main' }}
+          branch: ${{ github.head_ref }}
+          summary: 'true'
+          comment: 'true'
