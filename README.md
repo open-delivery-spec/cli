@@ -27,6 +27,18 @@ This is the new reality of AI-assisted development. AI code increases technical 
 
 ---
 
+## In Production
+
+ODS runs on every PR in the `open-delivery-spec` org (dogfooding):
+
+[![ODS on spec](https://github.com/open-delivery-spec/spec/actions/workflows/ods-validate.yml/badge.svg)](https://github.com/open-delivery-spec/spec/actions/workflows/ods-validate.yml)
+[![ODS on cli](https://github.com/open-delivery-spec/cli/actions/workflows/ods-validate.yml/badge.svg)](https://github.com/open-delivery-spec/cli/actions/workflows/ods-validate.yml)
+[![ODS on validate-action](https://github.com/open-delivery-spec/validate-action/actions/workflows/ods-validate.yml/badge.svg)](https://github.com/open-delivery-spec/validate-action/actions/workflows/ods-validate.yml)
+
+See [ADOPTERS.md](https://github.com/open-delivery-spec/spec/blob/main/ADOPTERS.md) for the full list and pending external adoption.
+
+---
+
 ## Quick Start
 
 ```bash
@@ -52,7 +64,9 @@ ods check
 
 ### `ods detect` — AI Code Detection
 
-Detects AI-generated code using commit trailers, branch names, PR disclosure, and diff heuristics.
+Detects AI-generated code using `Co-Authored-By` trailers, commit `AI-assisted:` footers, branch names, PR disclosure, and diff heuristics.
+
+`Co-Authored-By` trailers emitted by Claude Code, GitHub Copilot, and Cursor are the **primary** signal — no additional configuration needed.
 
 ```bash
 $ ods detect --diff-base origin/main --branch feature/ai-oauth
@@ -262,9 +276,9 @@ Or use individual CLI steps:
 
 ### See Also
 
-- [Module 04 End-to-End Example](https://github.com/open-delivery-spec/spec/tree/main/examples/module-04-ai-change-review) — Realistic L1/L2/L3 review scenario with scope drift detection
 - [validate-action README](https://github.com/open-delivery-spec/validate-action) — GitHub Action documentation
 - [Spec documentation](https://github.com/open-delivery-spec/spec) — Full specification and design principles
+- [ADOPTERS.md](https://github.com/open-delivery-spec/spec/blob/main/ADOPTERS.md) — Who is using ODS
 
 ---
 
