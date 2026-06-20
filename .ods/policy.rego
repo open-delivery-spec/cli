@@ -5,6 +5,17 @@ package ods.policy
 
 default allow := true
 
+# ── Helper Rules ───────────────────────────────────────────────
+
+# True when the diff contains at least one high or critical severity issue
+has_serious_issues {
+    input.issues[_].severity == "critical"
+}
+
+has_serious_issues {
+    input.issues[_].severity == "high"
+}
+
 # ── Blocking Rules ─────────────────────────────────────────────
 
 # Rule 1: Block critical quality issues unconditionally
@@ -23,10 +34,14 @@ deny[msg] {
     msg = sprintf("AI code in sensitive module %s has %.0f%% test coverage (min 60%%)", [file.path, input.test_coverage * 100])
 }
 
-# Rule 3: Block high technical debt delta
+# Rule 3: Block high technical debt when serious quality issues are present.
+# The debt delta is gated on high/critical issues because low/medium issues
+# in small diffs can produce artificially high defect-density numbers; those
+# are surfaced by Rule 5 (warn) rather than triggering a hard block.
 deny[msg] {
     input.technical_debt_delta > 5.0
-    msg = sprintf("Technical debt increase %.1f exceeds block threshold (5.0)", [input.technical_debt_delta])
+    has_serious_issues
+    msg = sprintf("Technical debt increase %.1f exceeds block threshold (5.0) — high/critical severity issues present", [input.technical_debt_delta])
 }
 
 # ── Warning Rules ──────────────────────────────────────────────

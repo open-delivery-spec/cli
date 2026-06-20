@@ -5,6 +5,7 @@ package scorer
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -14,21 +15,21 @@ import (
 
 // ScoreResult holds the full technical debt scoring output.
 type ScoreResult struct {
-	PRNumber            int                `json:"pr_number,omitempty"`
-	TechnicalDebtDelta  float64            `json:"technical_debt_delta"`
-	Breakdown           ScoreBreakdown     `json:"breakdown"`
-	Verdict             string             `json:"verdict"` // "decrease", "neutral", "increase"
-	Recommendation      string             `json:"recommendation"`
-	FilesAnalyzed       int                `json:"files_analyzed"`
+	PRNumber           int            `json:"pr_number,omitempty"`
+	TechnicalDebtDelta float64        `json:"technical_debt_delta"`
+	Breakdown          ScoreBreakdown `json:"breakdown"`
+	Verdict            string         `json:"verdict"` // "decrease", "neutral", "increase"
+	Recommendation     string         `json:"recommendation"`
+	FilesAnalyzed      int            `json:"files_analyzed"`
 }
 
 // ScoreBreakdown provides the dimensional scores.
 type ScoreBreakdown struct {
-	AICodeRatio     float64 `json:"ai_code_ratio"`      // AI lines / total lines
-	DefectDensity   float64 `json:"defect_density"`     // issues per KLOC
-	CriticalIssues  int     `json:"critical_issues"`    // critical + high severity
-	TestCoverage    float64 `json:"test_coverage"`      // test lines / total lines
-	DuplicationRate float64 `json:"duplication_rate"`   // estimated duplication
+	AICodeRatio     float64 `json:"ai_code_ratio"`    // AI lines / total lines
+	DefectDensity   float64 `json:"defect_density"`   // high/critical issues per KLOC
+	CriticalIssues  int     `json:"critical_issues"`  // critical + high severity
+	TestCoverage    float64 `json:"test_coverage"`    // test lines / total lines
+	DuplicationRate float64 `json:"duplication_rate"` // estimated duplication
 }
 
 // Options configures scoring behavior.
@@ -62,9 +63,11 @@ func Score(opts Options) *ScoreResult {
 		br.AICodeRatio = float64(aiLines) / float64(opts.TotalChangedLines)
 	}
 
-	// Dimension 2: Defect density (issues per KLOC)
+	// Dimension 2: Defect density using only high/critical issues per KLOC.
+	// Low/medium issues are surfaced as warnings but excluded from the blocking
+	// delta metric because they produce explosive density numbers on small diffs.
 	if opts.AnalyzerResult != nil && opts.AnalyzerResult.TotalLines > 0 {
-		br.DefectDensity = opts.AnalyzerResult.IssueDensity()
+		br.DefectDensity = opts.AnalyzerResult.SeverityWeightedDensity()
 		br.CriticalIssues = opts.AnalyzerResult.CriticalCount()
 	}
 
@@ -83,11 +86,11 @@ func Score(opts Options) *ScoreResult {
 	// Compute weighted tech debt delta
 	// Higher = worse (increasing debt)
 	delta := 0.0
-	delta += br.AICodeRatio * 3.0      // AI code weight: 3 (highest concern)
-	delta += br.DefectDensity * 2.0    // Defects weight: 2
+	delta += br.AICodeRatio * 3.0             // AI code weight: 3 (highest concern)
+	delta += br.DefectDensity * 2.0           // Defects weight: 2
 	delta += float64(br.CriticalIssues) * 1.5 // Critical issues: 1.5 each
-	delta += (1.0 - br.TestCoverage) * 1.0  // Low coverage: up to 1.0 penalty
-	delta += br.DuplicationRate * 1.0  // Duplication: 1.0
+	delta += (1.0 - br.TestCoverage) * 1.0    // Low coverage: up to 1.0 penalty
+	delta += br.DuplicationRate * 1.0         // Duplication: 1.0
 	result.TechnicalDebtDelta = delta
 
 	// Verdict
@@ -119,9 +122,14 @@ func Score(opts Options) *ScoreResult {
 }
 
 // estimateDuplication looks at git diff to estimate code duplication rate.
-// Simple heuristic: duplicate lines / total lines in the diff.
+// Reads ODS_DIFF_BASE from the environment (set by validate-action) so the
+// same diff range is used here as in the rest of the pipeline.
 func estimateDuplication() float64 {
-	out, err := exec.Command("git", "diff", "HEAD~1").Output()
+	diffBase := os.Getenv("ODS_DIFF_BASE")
+	if diffBase == "" {
+		diffBase = "HEAD~1"
+	}
+	out, err := exec.Command("git", "diff", diffBase).Output()
 	if err != nil {
 		return 0
 	}
@@ -131,7 +139,7 @@ func estimateDuplication() float64 {
 	totalAdded := 0
 
 	for _, line := range lines {
-		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "++") {
 			content := line[1:]
 			trimmed := strings.TrimSpace(content)
 			if trimmed == "" || strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "#") {
@@ -158,9 +166,9 @@ func estimateDuplication() float64 {
 
 // TrendPoint is a single data point for trend analysis.
 type TrendPoint struct {
-	Date                string  `json:"date"`
-	TechnicalDebtDelta  float64 `json:"technical_debt_delta"`
-	IsAIPR              bool    `json:"is_ai_pr"`
+	Date               string  `json:"date"`
+	TechnicalDebtDelta float64 `json:"technical_debt_delta"`
+	IsAIPR             bool    `json:"is_ai_pr"`
 }
 
 // Trend computes a trend over multiple PRs.

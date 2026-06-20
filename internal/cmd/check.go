@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/open-delivery-spec/cli/internal/analyzer"
 	"github.com/open-delivery-spec/cli/internal/detector"
@@ -51,6 +52,14 @@ func init() {
 }
 
 func runCheck(cmd *cobra.Command, args []string) error {
+	// Resolve diff base: ODS_DIFF_BASE is set by validate-action to the PR base SHA.
+	// Prefer it over the hardcoded HEAD~1 so the full PR diff is analysed rather than
+	// only the most-recent commit.
+	diffBase := "HEAD~1"
+	if envBase := os.Getenv("ODS_DIFF_BASE"); envBase != "" {
+		diffBase = envBase
+	}
+
 	// Discover policy file
 	policyPath := checkPolicyFile
 	if policyPath == "" {
@@ -62,7 +71,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 
 	// Run detector
-	detectOpts := detector.Options{DiffBase: "HEAD~1", MaxCommits: 10}
+	detectOpts := detector.Options{DiffBase: diffBase, MaxCommits: 10}
 	branch := detectBranch
 	if branch == "" {
 		// try env (check both names for compatibility)
@@ -80,8 +89,8 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		detectResult = &detector.DetectionResult{}
 	}
 
-	// Run analyzer
-	diffFiles, _ := getGitDiffFiles("HEAD~1")
+	// Run analyzer on the changed files for this diff range
+	diffFiles, _ := getGitDiffFiles(diffBase)
 	var analyzeResult *analyzer.AnalysisResult
 	if len(diffFiles) > 0 {
 		analyzeResult = analyzer.Analyze(analyzer.Options{Files: diffFiles})
@@ -89,17 +98,30 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		analyzeResult = &analyzer.AnalysisResult{}
 	}
 
-	// Compute score
+	// Derive TotalChangedLines and TestLines from the actual diff rather than from
+	// AI-detected file counts (which fall back to 1 when nothing is detected and
+	// cause TestCoverage and AICodeRatio to use a degenerate denominator).
 	totalLines := 0
-	for _, f := range detectResult.Files {
-		totalLines += f.TotalLines
+	testLines := 0
+	for path, lines := range diffFiles {
+		totalLines += len(lines)
+		if strings.HasSuffix(path, "_test.go") {
+			testLines += len(lines)
+		}
+	}
+	if totalLines == 0 {
+		for _, f := range detectResult.Files {
+			totalLines += f.TotalLines
+		}
 	}
 	if totalLines == 0 {
 		totalLines = 1
 	}
+
 	scoreResult := scorer.Score(scorer.Options{
 		DetectorResult:    detectResult,
 		AnalyzerResult:    analyzeResult,
+		TestLines:         testLines,
 		TotalChangedLines: totalLines,
 	})
 
@@ -212,4 +234,3 @@ func printCheckResult(cmd *cobra.Command, result *policy.EvalResult, policyPath 
 		}
 	}
 }
-
