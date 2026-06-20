@@ -17,7 +17,16 @@ how to work with Open Delivery Spec (ODS) in this repository.
 
 ## AI Disclosure
 
-When AI assists in generating code, always add these trailers to the commit footer:
+Claude Code, GitHub Copilot, and Cursor automatically add ` + "`Co-Authored-By`" + ` trailers
+to commits. ODS detects these as AI attribution signals — no additional configuration needed.
+
+For tools that do not emit ` + "`Co-Authored-By`" + ` automatically, add it to the commit footer:
+
+` + "`" + `
+Co-Authored-By: <AI Tool Name> <email>
+` + "`" + `
+
+Or use the ODS supplemental trailer fields:
 
 ` + "`" + `
 AI-assisted: true
@@ -55,9 +64,11 @@ const cursorRules = `# Cursor Rules — ODS Compliance
 You are working in a repository that follows the Open Delivery Spec (ODS).
 
 ## AI Disclosure
-When AI assists in generating code, add these trailers to every commit:
-AI-assisted: true
-AI-tool: Cursor
+Cursor automatically adds Co-Authored-By trailers to commits, which ODS detects
+as AI attribution. No additional configuration needed.
+
+For extra attribution metadata, you may add to the commit footer:
+AI-scope: <what you generated>
 AI-review: pending
 
 ## Commands
