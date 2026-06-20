@@ -235,7 +235,7 @@ func checkOverCommenting(file string, lines []string) []Issue {
 // ── Rule: ai-missing-edge-case ─────────────────────────────────
 
 var (
-	switchPattern = regexp.MustCompile(`switch\s+(\S+)`)
+	switchPattern  = regexp.MustCompile(`switch\s+(\S+)`)
 	defaultPattern = regexp.MustCompile(`default:`)
 )
 
@@ -375,9 +375,9 @@ func checkUnsafeDeserialization(file string, lines []string) []Issue {
 // ── Rule: ai-inconsistent-pattern ──────────────────────────────
 
 var (
-	camelCasePattern  = regexp.MustCompile(`\b[a-z][a-z0-9]*[A-Z][a-zA-Z0-9]*\b`)
-	snakeCasePattern  = regexp.MustCompile(`\b[a-z][a-z0-9]+(_[a-z][a-z0-9]+)+\b`)
-	tabIndentPattern  = regexp.MustCompile(`^\t+`)
+	camelCasePattern   = regexp.MustCompile(`\b[a-z][a-z0-9]*[A-Z][a-zA-Z0-9]*\b`)
+	snakeCasePattern   = regexp.MustCompile(`\b[a-z][a-z0-9]+(_[a-z][a-z0-9]+)+\b`)
+	tabIndentPattern   = regexp.MustCompile(`^\t+`)
 	spaceIndentPattern = regexp.MustCompile(`^    +`)
 )
 
@@ -466,6 +466,23 @@ func (r *AnalysisResult) IssueDensity() float64 {
 		return 0
 	}
 	return float64(len(r.Issues)) / float64(r.TotalLines) * 1000
+}
+
+// SeverityWeightedDensity returns defect density counting only high and critical
+// issues per KLOC. Low/medium issues influence warnings but not the blocking
+// debt metric — they produce artificially high density on small diffs and would
+// trigger false-positive policy blocks on any non-trivial change.
+func (r *AnalysisResult) SeverityWeightedDensity() float64 {
+	if r.TotalLines == 0 {
+		return 0
+	}
+	count := 0
+	for _, issue := range r.Issues {
+		if issue.Severity == "critical" || issue.Severity == "high" {
+			count++
+		}
+	}
+	return float64(count) / float64(r.TotalLines) * 1000
 }
 
 // HasCritical returns true if any critical issues found.
