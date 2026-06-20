@@ -112,6 +112,9 @@ func Detect(opts Options) (*DetectionResult, error) {
 }
 
 // aggregate computes the overall detection verdict from collected evidence.
+// Uses max-confidence as the baseline with a small boost per additional corroborating
+// signal. This ensures that adding more positive signals never reduces overall
+// confidence (which a weighted average does when mixing high and low-confidence signals).
 func (r *DetectionResult) aggregate() {
 	if len(r.Evidence) == 0 && len(r.Files) == 0 {
 		r.AIGenerated = false
@@ -120,38 +123,28 @@ func (r *DetectionResult) aggregate() {
 		return
 	}
 
-	// Compute weighted confidence from all evidence
-	totalWeight := 0.0
-	weightedSum := 0.0
-
+	// Use the highest individual signal confidence as the baseline.
+	maxConf := 0.0
 	for _, ev := range r.Evidence {
-		weight := 1.0
-		switch ev.Source {
-		case "commit-trailer":
-			weight = 0.9 // explicit AI marker in commit: high confidence
-		case "branch-name":
-			weight = 0.5 // ai- prefix: moderate confidence
-		case "pr-body":
-			weight = 0.85 // explicit disclosure in PR: high confidence
-		case "diff-heuristics":
-			weight = 0.4 // statistical pattern: lower confidence
+		if ev.Confidence > maxConf {
+			maxConf = ev.Confidence
 		}
-		weightedSum += ev.Confidence * weight
-		totalWeight += weight
 	}
-
-	// Also factor in per-file detections
 	for _, f := range r.Files {
-		weightedSum += f.Confidence * 0.3
-		totalWeight += 0.3
-	}
-
-	if totalWeight > 0 {
-		r.Confidence = weightedSum / totalWeight
-		if r.Confidence > 1.0 {
-			r.Confidence = 1.0
+		if f.Confidence > maxConf {
+			maxConf = f.Confidence
 		}
 	}
+
+	// Each additional corroborating signal adds a 5% boost (capped at 1.0).
+	extraSignals := len(r.Evidence) + len(r.Files) - 1
+	if extraSignals > 0 {
+		maxConf += 0.05 * float64(extraSignals)
+		if maxConf > 1.0 {
+			maxConf = 1.0
+		}
+	}
+	r.Confidence = maxConf
 
 	r.AIGenerated = r.Confidence >= 0.3
 
