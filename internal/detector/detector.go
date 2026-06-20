@@ -55,7 +55,7 @@ type Options struct {
 // DefaultOptions returns sensible defaults.
 func DefaultOptions() Options {
 	return Options{
-		DiffBase:  "HEAD~1",
+		DiffBase:   "HEAD~1",
 		MaxCommits: 10,
 	}
 }
@@ -74,14 +74,14 @@ func Detect(opts Options) (*DetectionResult, error) {
 		Sources:  make([]string, 0),
 	}
 
-	// Source 1: Git commit trailers (AI-assisted: true)
+	// Source 1: Git commit trailers (AI-assisted: true, Co-Authored-By: Claude...)
 	commitEvidence := detectFromCommits(opts)
 	result.Evidence = append(result.Evidence, commitEvidence...)
 	if len(commitEvidence) > 0 {
 		result.Sources = append(result.Sources, "commit-trailer")
 	}
 
-	// Source 2: Branch name prefix (ai-)
+	// Source 2: Branch name prefix (ai-, claude/, copilot/, etc.)
 	if opts.BranchName != "" {
 		if ev := detectFromBranch(opts.BranchName); ev != nil {
 			result.Evidence = append(result.Evidence, *ev)
@@ -174,6 +174,47 @@ func (r *DetectionResult) aggregate() {
 	}
 }
 
+// knownAICoAuthorPrefixes contains lowercase name prefixes for known AI tools
+// that appear as the name part of Co-Authored-By git trailers.
+// Per ODS spec Module 02, Co-Authored-By is the primary AI attribution signal.
+var knownAICoAuthorPrefixes = []string{
+	"claude",         // Co-Authored-By: Claude <noreply@anthropic.com>  (Claude Code)
+	"github copilot", // Co-Authored-By: GitHub Copilot <copilot@github.com>
+	"copilot",        // Co-Authored-By: copilot[bot] <...>  (variant)
+	"cursor",         // Co-Authored-By: cursor[bot] <cursor@cursor.sh>  (Cursor)
+	"codeium",        // Co-Authored-By: Codeium <noreply@codeium.com>
+	"tabnine",        // Co-Authored-By: tabnine[bot] <...>  (Tabnine)
+	"ai",             // Co-Authored-By: AI  (generic / legacy ODS format)
+}
+
+// isAICoAuthor returns true if line is a Co-Authored-By trailer referencing a known AI tool.
+func isAICoAuthor(line string) bool {
+	lower := strings.ToLower(strings.TrimSpace(line))
+	if !strings.HasPrefix(lower, "co-authored-by:") {
+		return false
+	}
+	namePart := strings.TrimSpace(lower[len("co-authored-by:"):])
+	for _, prefix := range knownAICoAuthorPrefixes {
+		if strings.HasPrefix(namePart, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// extractCoAuthorTool extracts the display name from a Co-Authored-By trailer.
+func extractCoAuthorTool(line string) string {
+	lower := strings.ToLower(strings.TrimSpace(line))
+	if !strings.HasPrefix(lower, "co-authored-by:") {
+		return ""
+	}
+	name := strings.TrimSpace(line[len("co-authored-by:"):])
+	if idx := strings.Index(name, "<"); idx != -1 {
+		name = strings.TrimSpace(name[:idx])
+	}
+	return name
+}
+
 // detectFromCommits checks recent git commits for AI-related trailers.
 func detectFromCommits(opts Options) []Evidence {
 	var evidence []Evidence
@@ -195,7 +236,7 @@ func detectFromCommits(opts Options) []Evidence {
 	}
 
 	// Parse each commit for AI-related footers
-	// AI-assisted: true | AI-tool: <name> | AI-scope: <scope>
+	// AI-assisted: true | AI-tool: <name> | Co-Authored-By: Claude <...>
 	commits := strings.Split(log, "\n\n---\n\n")
 	if len(commits) == 1 {
 		// git log doesn't add separators; split on commit delimiters
@@ -216,8 +257,11 @@ func detectFromCommits(opts Options) []Evidence {
 			line = strings.TrimSpace(line)
 			if strings.EqualFold(line, "AI-assisted: true") ||
 				strings.EqualFold(line, "AI-generated: true") ||
-				strings.EqualFold(line, "Co-Authored-By: AI") {
+				isAICoAuthor(line) {
 				hasAI = true
+				if tool := extractCoAuthorTool(line); tool != "" && aiTool == "" {
+					aiTool = tool
+				}
 			}
 			if strings.HasPrefix(strings.ToLower(line), "ai-tool:") {
 				aiTool = strings.TrimSpace(line[len("ai-tool:"):])
@@ -282,12 +326,22 @@ func isConventionalCommitStart(line string) bool {
 	return convCommitPattern.MatchString(line)
 }
 
+// knownAIToolBranchNames contains the first path segment used by AI coding tools
+// when they auto-create branches (e.g., claude/..., copilot/..., cursor/...).
+var knownAIToolBranchNames = []string{
+	"claude",  // Claude Code CLI: claude/<description>
+	"copilot", // GitHub Copilot: copilot/<description>
+	"cursor",  // Cursor: cursor/<description>
+	"codeium", // Codeium: codeium/<description>
+}
+
 // detectFromBranch checks if the branch name indicates AI-generated code.
 func detectFromBranch(branchName string) *Evidence {
 	name := strings.TrimSpace(branchName)
+	lower := strings.ToLower(name)
 
-	// Check for ai- prefix
-	if strings.HasPrefix(strings.ToLower(name), "ai-") {
+	// Check for ai- prefix at root level
+	if strings.HasPrefix(lower, "ai-") {
 		return &Evidence{
 			Source:     "branch-name",
 			Signal:     "ai-prefix",
@@ -296,8 +350,22 @@ func detectFromBranch(branchName string) *Evidence {
 		}
 	}
 
-	// Check for /ai- in branch name segments
-	for _, segment := range strings.Split(name, "/") {
+	// Check first segment for known AI tool names (e.g., claude/..., copilot/...)
+	segments := strings.Split(name, "/")
+	firstSegmentLower := strings.ToLower(segments[0])
+	for _, aiTool := range knownAIToolBranchNames {
+		if firstSegmentLower == aiTool {
+			return &Evidence{
+				Source:     "branch-name",
+				Signal:     "ai-tool-branch",
+				Value:      fmt.Sprintf("Branch '%s' was created by AI tool (%s)", name, segments[0]),
+				Confidence: 0.6,
+			}
+		}
+	}
+
+	// Check for /ai- in any branch segment
+	for _, segment := range segments {
 		if strings.HasPrefix(strings.ToLower(segment), "ai-") {
 			return &Evidence{
 				Source:     "branch-name",
@@ -607,7 +675,7 @@ func extractAddedLines(diff string) []string {
 	scanner := bufio.NewScanner(strings.NewReader(diff))
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "++"+"+") {
 			lines = append(lines, line[1:])
 		}
 	}
@@ -677,6 +745,19 @@ func ParseCommitMessage(msg string) []Evidence {
 				Signal:     "ai-tool",
 				Value:      fmt.Sprintf("AI tool: %s", tool),
 				Confidence: 0.95,
+			})
+		}
+		if isAICoAuthor(line) {
+			tool := extractCoAuthorTool(line)
+			value := "AI Co-Authored-By trailer"
+			if tool != "" {
+				value = fmt.Sprintf("AI Co-Authored-By: %s", tool)
+			}
+			evidence = append(evidence, Evidence{
+				Source:     "commit-message",
+				Signal:     "co-authored-by",
+				Value:      value,
+				Confidence: 0.9,
 			})
 		}
 	}
@@ -755,5 +836,3 @@ func (r *DetectionResult) FileCount() int {
 func (r *DetectionResult) LineSummary() string {
 	return FormatDiffLineCount(r.Files)
 }
-
-
