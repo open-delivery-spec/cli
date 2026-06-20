@@ -52,9 +52,10 @@ type EvalIssue struct {
 
 // Evaluate evaluates a Rego policy file against the given input.
 // The policy file at path should contain a package ods.policy with:
-//   deny[msg] { ... }
-//   warn[msg] { ... }
-//   default allow = true
+//
+//	deny[msg] { ... }
+//	warn[msg] { ... }
+//	default allow = true
 func Evaluate(policyPath string, input *EvalInput) (*EvalResult, error) {
 	data, err := os.ReadFile(policyPath)
 	if err != nil {
@@ -187,7 +188,7 @@ deny[msg] {
 
 deny[msg] {
     input.technical_debt_delta > 5.0
-    msg = sprintf("Technical debt increase %.1f exceeds threshold (5.0)", [input.technical_debt_delta])
+    msg = sprintf("Technical debt increase %.1f exceeds threshold (5.0)", [input.technical_debt_delta * 1.0])
 }
 
 warn[msg] {
@@ -200,7 +201,7 @@ warn[msg] {
 warn[msg] {
     input.test_coverage < 0.3
     input.ai_generated == true
-    msg = sprintf("AI-generated code has only %.0f%% test coverage", [input.test_coverage * 100])
+    msg = sprintf("AI-generated code has only %.0f%% test coverage", [input.test_coverage * 100.0])
 }
 `
 }
@@ -224,13 +225,13 @@ deny[msg] {
     regex.match(".*(payment|auth|billing).*", file.path)
     file.confidence > 0.5
     input.test_coverage < 0.6
-    msg = sprintf("AI code in sensitive module %s has %.0f%% test coverage (min 60%%)", [file.path, input.test_coverage * 100])
+    msg = sprintf("AI code in sensitive module %s has %.0f%% test coverage (min 60%%)", [file.path, input.test_coverage * 100.0])
 }
 
 # Rule 3: Block high tech debt delta
 deny[msg] {
     input.technical_debt_delta > 5.0
-    msg = sprintf("Technical debt increase %.1f exceeds block threshold", [input.technical_debt_delta])
+    msg = sprintf("Technical debt increase %.1f exceeds block threshold", [input.technical_debt_delta * 1.0])
 }
 
 # Rule 4: Warn on high-confidence AI with no tests
@@ -238,7 +239,7 @@ warn[msg] {
     input.ai_generated == true
     input.ai_confidence > 0.7
     input.test_coverage < 0.2
-    msg = sprintf("High-confidence AI code (%.0f%%) with low test coverage (%.0f%%)", [input.ai_confidence * 100, input.test_coverage * 100])
+    msg = sprintf("High-confidence AI code (%.0f%%) with low test coverage (%.0f%%)", [input.ai_confidence * 100.0, input.test_coverage * 100.0])
 }
 
 # Rule 5: Warn on high defect density

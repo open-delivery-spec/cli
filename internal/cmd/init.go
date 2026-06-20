@@ -86,21 +86,18 @@ on:
 jobs:
   ods:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@v4
         with:
-          go-version: "1.25"
-      - name: Install ODS
-        run: go install github.com/open-delivery-spec/cli/cmd/ods@latest
-      - name: Detect AI code
-        run: ods detect --json
-      - name: Analyze AI code quality
-        run: ods analyze --json
-      - name: Score technical debt
-        run: ods score --json
-      - name: Evaluate policy
-        run: ods check --json
+          fetch-depth: 0
+      - uses: open-delivery-spec/validate-action@v1
+        with:
+          diff-base: ${{ github.event.pull_request.base.sha }}
+          pr-body: ${{ github.event.pull_request.body }}
+          branch: ${{ github.head_ref }}
+          commits: ${{ github.event.pull_request.commits }}
 `
 
 var initCmd = &cobra.Command{
