@@ -31,9 +31,9 @@ Detection uses multiple independent signal sources and outputs a
 confidence score — without requiring developer self-disclosure.
 
 Signal sources (in order of confidence):
-  1. Git commit trailers (AI-assisted: true, AI-tool: name)
+  1. Git commit trailers (Co-Authored-By: <ai-tool>)
   2. PR description AI disclosure section
-  3. Branch name prefix (ai-*)
+  3. Branch name prefix (claude/, copilot/, cursor/, codeium/, ai-)
   4. Code diff heuristics (comment ratio, naming patterns, error handling)
 
 Examples:
@@ -130,9 +130,9 @@ func runDetect(cmd *cobra.Command, args []string) error {
 
 func printSummary(cmd *cobra.Command, result *detector.DetectionResult) {
 	if result.AIGenerated {
-		fmt.Fprintf(cmd.OutOrStdout(), "🤖  %s\n", result.Summary)
+		fmt.Fprintf(cmd.OutOrStdout(), "\U0001f916  %s\n", result.Summary)
 	} else {
-		fmt.Fprintf(cmd.OutOrStdout(), "👤  %s\n", result.Summary)
+		fmt.Fprintf(cmd.OutOrStdout(), "\U0001f464  %s\n", result.Summary)
 	}
 
 	if len(result.Sources) > 0 {
@@ -149,9 +149,9 @@ func printSummary(cmd *cobra.Command, result *detector.DetectionResult) {
 }
 
 func printDetailed(cmd *cobra.Command, result *detector.DetectionResult) {
-	statusIcon := "👤"
+	statusIcon := "\U0001f464"
 	if result.AIGenerated {
-		statusIcon = "🤖"
+		statusIcon = "\U0001f916"
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "%s  AI Code Detection Report\n", statusIcon)
@@ -173,7 +173,7 @@ func printDetailed(cmd *cobra.Command, result *detector.DetectionResult) {
 	if len(result.Files) > 0 {
 		fmt.Fprintln(cmd.OutOrStdout(), "File Analysis:")
 		fmt.Fprintf(cmd.OutOrStdout(), "  %-40s %8s %8s %10s\n", "File", "AI Lines", "Total", "Confidence")
-		fmt.Fprintln(cmd.OutOrStdout(), "  " + strings.Repeat("─", 70))
+		fmt.Fprintln(cmd.OutOrStdout(), "  "+strings.Repeat("─", 70))
 		for _, f := range result.Files {
 			fmt.Fprintf(cmd.OutOrStdout(), "  %-40s %8d %8d %9.0f%%\n",
 				f.Path, f.AILines, f.TotalLines, f.Confidence*100)
