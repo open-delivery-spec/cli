@@ -255,7 +255,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: open-delivery-spec/validate-action@v2
+      - uses: open-delivery-spec/validate-action@v1
 ```
 
 Or use individual CLI steps:
