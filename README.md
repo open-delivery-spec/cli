@@ -1,6 +1,6 @@
 # ODS CLI
 
-> **Detect AI-generated code, analyze its quality, and prevent technical debt — before it reaches production.**
+> **Zero-config AI code detection for teams using Claude Code, Copilot, or Cursor.** These tools already write `Co-Authored-By` trailers to every commit. ODS reads them automatically in CI — detecting AI-generated code, analyzing quality, scoring technical debt, and enforcing policy on every PR.
 
 [![CI](https://github.com/open-delivery-spec/cli/actions/workflows/ci.yml/badge.svg)](https://github.com/open-delivery-spec/cli/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://go.dev)
@@ -10,17 +10,17 @@
 
 ## The Problem
 
-A PR arrives: 8 commits, 6 written by Copilot, 2 by a human. The branch says `feature/add-sarif-output`. But two changed files touch the authentication module — nothing to do with SARIF. The reviewer doesn't know. The merge happens. A bug ships.
+A PR arrives: 8 commits, 6 written by Copilot, 2 by a human. The branch says `feature/add-sarif-output`. But two changed files touch the authentication module — nothing to do with SARIF. The reviewer doesn’t know. The merge happens. A bug ships.
 
 This is the new reality of AI-assisted development. AI code increases technical debt in predictable ways:
 
 | AI Failure Mode | Real-world impact |
 |---|---|
-| **Hallucinated APIs** | AI invents functions, packages, and endpoints that don't exist |
+| **Hallucinated APIs** | AI invents functions, packages, and endpoints that don’t exist |
 | **Redundant error handling** | AI over-defends: 3+ identical `if err != nil` blocks in the same function |
 | **Over-commenting** | AI writes 35%+ comment-to-code ratio with self-explanatory comments |
 | **No test coverage** | AI PRs average 22% test coverage vs 68% for human PRs |
-| **Invisible AI code** | Teams can't distinguish AI-generated from human-written changes |
+| **Invisible AI code** | Teams can’t distinguish AI-generated from human-written changes |
 | **Scope drift** | AI changes files unrelated to the stated feature |
 
 **ODS is the CI gate that detects AI code, analyzes its quality, scores technical debt impact, and enforces enterprise policy — on every pull request.**
