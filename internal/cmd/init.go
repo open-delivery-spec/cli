@@ -8,76 +8,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var initPlatform string
-
-const agentsMD = `# AGENTS.md — ODS Compliance for AI Coding Agents
-
-This file tells AI coding assistants (Claude Code, Cursor, GitHub Copilot, etc.)
-how to work with Open Delivery Spec (ODS) in this repository.
-
-## AI Disclosure
-
-Claude Code, GitHub Copilot, and Cursor automatically add ` + "`Co-Authored-By`" + ` trailers
-to commits. ODS detects these as AI attribution signals — no additional configuration needed.
-
-For tools that do not emit ` + "`Co-Authored-By`" + ` automatically, add it to the commit footer:
-
-` + "`" + `
-Co-Authored-By: <AI Tool Name> <email>
-` + "`" + `
-
-Or use the ODS supplemental trailer fields:
-
-` + "`" + `
-AI-assisted: true
-AI-tool: <tool-name>
-AI-review: pending
-` + "`" + `
-
-## Quick Reference
-
-` + "`" + `bash
-# Detect AI code in your changes
-ods detect
-
-# Analyze AI code quality
-ods analyze
-
-# Score technical debt impact
-ods score
-
-# Check against enterprise policy
-ods check
-` + "`" + `
-
-## Installation
-
-` + "`" + `bash
-go install github.com/open-delivery-spec/cli/cmd/ods@latest
-ods init
-ods hook install
-` + "`" + `
-`
-
-const cursorRules = `# Cursor Rules — ODS Compliance
-
-You are working in a repository that follows the Open Delivery Spec (ODS).
-
-## AI Disclosure
-Cursor automatically adds Co-Authored-By trailers to commits, which ODS detects
-as AI attribution. No additional configuration needed.
-
-For extra attribution metadata, you may add to the commit footer:
-AI-scope: <what you generated>
-AI-review: pending
-
-## Commands
-- ods detect  — Detect AI-generated code
-- ods analyze — Analyze AI code quality
-- ods score   — Score technical debt impact
-- ods check   — Evaluate enterprise policy
-`
-
 const odsWorkflow = `name: ODS AI Code Quality
 on:
   pull_request:
@@ -131,10 +61,8 @@ var initCmd = &cobra.Command{
 	Long: `Initialize ODS in your repository with a single command.
 
 Scaffolds:
-  • CI workflow for automated AI code quality checks
-  • .ods/policy.rego  — OPA Rego policy (edit to add custom rules)
-  • AGENTS.md for AI agent integration
-  • .cursor/rules/ods-compliance.mdc for Cursor AI
+  • .github/workflows/ods-ai-quality.yml  — CI workflow for AI code quality checks
+  • .ods/policy.rego                       — OPA Rego policy (edit to add custom rules)
 
 Examples:
   ods init`,
@@ -147,21 +75,17 @@ func init() {
 
 func runInit(cmd *cobra.Command, args []string) error {
 	workflowsDir := filepath.Join(".github", "workflows")
-	cursorRulesDir := filepath.Join(".cursor", "rules")
 	odsDir := ".ods"
 
-	dirs := []string{".github", workflowsDir, odsDir, cursorRulesDir}
-	for _, d := range dirs {
+	for _, d := range []string{".github", workflowsDir, odsDir} {
 		if err := os.MkdirAll(d, 0755); err != nil {
 			return fmt.Errorf("creating directory %s: %w", d, err)
 		}
 	}
 
 	files := map[string]string{
-		filepath.Join(workflowsDir, "ods-ai-quality.yml"):     odsWorkflow,
-		filepath.Join(odsDir, "policy.rego"):                  defaultPolicy,
-		"AGENTS.md":                                           agentsMD,
-		filepath.Join(cursorRulesDir, "ods-compliance.mdc"):   cursorRules,
+		filepath.Join(workflowsDir, "ods-ai-quality.yml"): odsWorkflow,
+		filepath.Join(odsDir, "policy.rego"):              defaultPolicy,
 	}
 
 	for path, content := range files {
@@ -179,10 +103,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Println("── ODS initialized ──")
 	fmt.Println()
 	fmt.Println("Next steps:")
-	fmt.Println("  1. Install git hooks: ods hook install")
-	fmt.Println("  2. Edit .ods/policy.rego to add custom enforcement rules")
+	fmt.Println("  1. Edit .ods/policy.rego to add custom enforcement rules")
+	fmt.Println("  2. Install git hooks:  ods hook install")
 	fmt.Println("  3. Commit and push — ODS will run on your next PR")
-	fmt.Println("  4. AI agents will pick up AGENTS.md and .cursor/rules/ automatically")
 
 	return nil
 }
