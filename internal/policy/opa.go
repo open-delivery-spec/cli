@@ -201,7 +201,8 @@ warn[msg] {
 warn[msg] {
     input.test_coverage < 0.3
     input.ai_generated == true
-    msg = sprintf("AI-generated code has only %.0f%% test coverage", [input.test_coverage * 100.0])
+    pct := round(input.test_coverage * 100)
+    msg = sprintf("AI-generated code has only %d%% test coverage", [pct])
 }
 `
 }
@@ -225,7 +226,8 @@ deny[msg] {
     regex.match(".*(payment|auth|billing).*", file.path)
     file.confidence > 0.5
     input.test_coverage < 0.6
-    msg = sprintf("AI code in sensitive module %s has %.0f%% test coverage (min 60%%)", [file.path, input.test_coverage * 100.0])
+    pct := round(input.test_coverage * 100)
+    msg = sprintf("AI code in sensitive module %s has %d%% test coverage (min 60%%)", [file.path, pct])
 }
 
 # Rule 3: Block high tech debt delta
@@ -239,7 +241,9 @@ warn[msg] {
     input.ai_generated == true
     input.ai_confidence > 0.7
     input.test_coverage < 0.2
-    msg = sprintf("High-confidence AI code (%.0f%%) with low test coverage (%.0f%%)", [input.ai_confidence * 100.0, input.test_coverage * 100.0])
+    ai_pct := round(input.ai_confidence * 100)
+    test_pct := round(input.test_coverage * 100)
+    msg = sprintf("High-confidence AI code (%d%%) with low test coverage (%d%%)", [ai_pct, test_pct])
 }
 
 # Rule 5: Warn on high defect density
