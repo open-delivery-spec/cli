@@ -125,10 +125,15 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		TotalChangedLines: totalLines,
 	})
 
-	// Build list of changed file paths
-	var changedFiles []string
-	for f := range diffFiles {
-		changedFiles = append(changedFiles, f)
+	// Build complete list of changed file paths for policy input.
+	// getAllChangedFiles includes all file types (not just code files), so Rego
+	// rules like `endswith(input.changed_files[_], ".go")` work correctly.
+	changedFiles, _ := getAllChangedFiles(diffBase)
+	if len(changedFiles) == 0 {
+		// Fallback: use keys from code-file diff when git is unavailable
+		for f := range diffFiles {
+			changedFiles = append(changedFiles, f)
+		}
 	}
 
 	// Build policy input

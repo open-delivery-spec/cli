@@ -200,7 +200,7 @@ func printAnalyzeDetail(cmd *cobra.Command, result *analyzer.AnalysisResult) {
 
 	fmt.Fprintln(cmd.OutOrStdout(), "Issues:")
 	fmt.Fprintf(cmd.OutOrStdout(), "  %-6s %-35s %-6s %s\n", "Severity", "Rule", "Line", "Message")
-	fmt.Fprintln(cmd.OutOrStdout(), "  " + strings.Repeat("─", 100))
+	fmt.Fprintln(cmd.OutOrStdout(), "  "+strings.Repeat("─", 100))
 	for _, issue := range result.Issues {
 		fmt.Fprintf(cmd.OutOrStdout(), "  %s %-6s %-35s %-6d %s\n",
 			severityIcon(issue.Severity), issue.Severity, issue.Rule, issue.Line, issue.Message)
@@ -231,7 +231,8 @@ func severityIcon(severity string) string {
 	}
 }
 
-// getGitDiffFiles gets changed files from git diff.
+// getGitDiffFiles returns changed code files with their added lines.
+// Only includes files with recognised code extensions that have added content.
 func getGitDiffFiles(base string) (map[string][]string, error) {
 	out, err := exec.Command("git", "diff", "--name-only", base).Output()
 	if err != nil {
@@ -257,10 +258,27 @@ func getGitDiffFiles(base string) (map[string][]string, error) {
 	return files, nil
 }
 
+// getAllChangedFiles returns all file paths changed in the diff, with no extension
+// filtering. Used to populate input.changed_files in Rego policy evaluation.
+func getAllChangedFiles(base string) ([]string, error) {
+	out, err := exec.Command("git", "diff", "--name-only", base).Output()
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, name := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			files = append(files, name)
+		}
+	}
+	return files, nil
+}
+
 func extractAdded(diff []byte) []string {
 	var lines []string
 	for _, line := range strings.Split(string(diff), "\n") {
-		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "++") {
 			lines = append(lines, line[1:])
 		}
 	}
