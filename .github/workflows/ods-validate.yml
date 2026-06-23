@@ -16,32 +16,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate branch naming
-        run: |
-          BRANCH="${{ github.head_ref }}"
-          if echo "$BRANCH" | grep -qE '^(feature|bugfix|hotfix|release|chore)/';
-          then
-            echo "✅ Branch '$BRANCH' follows naming convention"
-          else
-            echo "⚠️ Branch '$BRANCH' does not follow conventional branch naming"
-          fi
-
-      - name: Validate commit messages
-        run: |
-          BASE="${{ github.event.pull_request.base.sha }}"
-          HEAD="${{ github.event.pull_request.head.sha }}"
-          COMMITS=$(git log --oneline "$BASE..$HEAD" 2>/dev/null)
-          if [ -z "$COMMITS" ]; then
-            echo "No commits to validate (maybe squash merge)"
-          else
-            echo "$COMMITS" | while IFS= read -r line; do
-              if echo "$line" | grep -qE '^(feat|fix|docs|style|refactor|perf|test|chore|ci|build)(\(.+\))?:'; then
-                echo "✅ $line"
-              else
-                echo "⚠️  $line (does not follow Conventional Commits)"
-              fi
-            done
-          fi
+      - name: Conventional branch & commit checks
+        uses: commit-check/commit-check-action@v2
+        with:
+          message: true
+          branch: true
 
       - name: Validate PR description
         run: |
