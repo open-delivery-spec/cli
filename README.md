@@ -220,11 +220,18 @@ $ ods hook install
 
 ```bash
 $ ods init
-✅  Created .github/workflows/ods-ai-quality.yml
-✅  Created AGENTS.md (agent instructions for AI coding assistants)
-✅  Created .cursor/rules/gov-001-ods-compliance.mdc (Cursor rules)
-✅  Created .ods/policy.rego (default enterprise policy)
+  ✅ Created: .github/workflows/ods-ai-quality.yml
+  ✅ Created: .ods/policy.rego
+
+── ODS initialized ──
+
+Next steps:
+  1. Edit .ods/policy.rego to add custom enforcement rules
+  2. Install git hooks:  ods hook install
+  3. Commit and push — ODS will run on your next PR
 ```
+
+`init` is idempotent — existing files are skipped, never overwritten.
 
 ---
 
