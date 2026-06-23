@@ -15,12 +15,12 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ github.head_ref }}
 
       - name: Conventional branch & commit checks
-        uses: commit-check/commit-check-action@v2
-        with:
-          message: true
-          branch: true
+        run: |
+          python3 -m pip install 'commit-check>=2.9.0'
+          commit-check --message --branch
 
       - name: Validate PR description
         run: |
