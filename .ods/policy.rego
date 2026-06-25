@@ -30,6 +30,7 @@ deny[msg] {
     file := input.ai_files[_]
     regex.match(".*(auth|payment|billing|security|crypto).*", file.path)
     file.confidence > 0.5
+    input.test_coverage >= 0
     input.test_coverage < 0.6
     msg = sprintf("AI code in sensitive module %s has %.0f%% test coverage (min 60%%)", [file.path, input.test_coverage * 100])
 }
@@ -50,6 +51,7 @@ deny[msg] {
 warn[msg] {
     input.ai_generated == true
     input.ai_confidence > 0.7
+    input.test_coverage >= 0
     input.test_coverage < 0.3
     msg = sprintf("High-confidence AI code (%.0f%%) with low test coverage (%.0f%%)", [input.ai_confidence * 100, input.test_coverage * 100])
 }
