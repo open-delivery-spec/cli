@@ -25,11 +25,12 @@ type ScoreResult struct {
 
 // ScoreBreakdown provides the dimensional scores.
 type ScoreBreakdown struct {
-	AICodeRatio     float64 `json:"ai_code_ratio"`    // AI lines / total lines
-	DefectDensity   float64 `json:"defect_density"`   // high/critical issues per KLOC
-	CriticalIssues  int     `json:"critical_issues"`  // critical + high severity
-	TestCoverage    float64 `json:"test_coverage"`    // test lines / total lines
-	DuplicationRate float64 `json:"duplication_rate"` // estimated duplication
+	AICodeRatio        float64 `json:"ai_code_ratio"`          // AI lines / total lines
+	DefectDensity      float64 `json:"defect_density"`         // high/critical issues per KLOC
+	CriticalIssues     int     `json:"critical_issues"`        // critical + high severity
+	TestCoverage       float64 `json:"test_coverage"`          // fraction in [0,1] or -1 if not measured
+	TestCoverageSource string  `json:"test_coverage_source"`   // go/lcov/cobertura/nyc/estimated/unknown
+	DuplicationRate    float64 `json:"duplication_rate"`       // estimated duplication
 }
 
 // Options configures scoring behavior.
@@ -38,10 +39,22 @@ type Options struct {
 	DetectorResult *detector.DetectionResult
 	// AnalyzerResult from quality analysis.
 	AnalyzerResult *analyzer.AnalysisResult
-	// TestFiles is the number of lines in test files changed.
+	// TestLines is the number of lines in test files changed (used when CoverageResult is nil).
 	TestLines int
 	// TotalChangedLines is the total lines changed in the PR.
 	TotalChangedLines int
+	// CoverageResult carries a parsed coverage fraction from a real coverage file.
+	// When nil, coverage is estimated from TestLines/TotalChangedLines (or marked -1 if
+	// TestLines is also 0). When set, its Coverage field may be -1 for "not measured".
+	CoverageResult *CoverageInput
+}
+
+// CoverageInput carries the parsed coverage fraction and its source.
+type CoverageInput struct {
+	// Coverage is in [0,1], or -1 when not measured.
+	Coverage float64
+	// Source identifies the parser that produced the value.
+	Source string
 }
 
 // Score computes the technical debt score from available inputs.
@@ -71,9 +84,23 @@ func Score(opts Options) *ScoreResult {
 		br.CriticalIssues = opts.AnalyzerResult.CriticalCount()
 	}
 
-	// Dimension 3: Test coverage ratio
-	if opts.TotalChangedLines > 0 {
+	// Dimension 3: Test coverage.
+	// Prefer an explicitly provided coverage result from a parsed file.
+	// Fall back to estimating from test-file line counts in the diff.
+	// -1 sentinel means "not measured" — the coverage penalty is skipped.
+	switch {
+	case opts.CoverageResult != nil:
+		br.TestCoverage = opts.CoverageResult.Coverage
+		br.TestCoverageSource = opts.CoverageResult.Source
+		if br.TestCoverageSource == "" {
+			br.TestCoverageSource = "unknown"
+		}
+	case opts.TotalChangedLines > 0 && opts.TestLines > 0:
 		br.TestCoverage = float64(opts.TestLines) / float64(opts.TotalChangedLines)
+		br.TestCoverageSource = "estimated"
+	default:
+		br.TestCoverage = -1
+		br.TestCoverageSource = "unknown"
 	}
 
 	// Dimension 4: Duplication rate (estimated via git)
@@ -83,14 +110,18 @@ func Score(opts Options) *ScoreResult {
 
 	result.Breakdown = br
 
-	// Compute weighted tech debt delta
-	// Higher = worse (increasing debt)
+	// Compute weighted tech debt delta.
+	// Higher = worse (increasing debt).
+	// Coverage penalty is skipped when coverage was not measured (-1 sentinel)
+	// to avoid false-positive blocks on PRs where no coverage tool is configured.
 	delta := 0.0
 	delta += br.AICodeRatio * 3.0             // AI code weight: 3 (highest concern)
 	delta += br.DefectDensity * 2.0           // Defects weight: 2
 	delta += float64(br.CriticalIssues) * 1.5 // Critical issues: 1.5 each
-	delta += (1.0 - br.TestCoverage) * 1.0    // Low coverage: up to 1.0 penalty
-	delta += br.DuplicationRate * 1.0         // Duplication: 1.0
+	if br.TestCoverage >= 0 {
+		delta += (1.0 - br.TestCoverage) * 1.0 // Low coverage: up to 1.0 penalty
+	}
+	delta += br.DuplicationRate * 1.0 // Duplication: 1.0
 	result.TechnicalDebtDelta = delta
 
 	// Verdict
@@ -208,13 +239,17 @@ func Trend(points []TrendPoint) string {
 // FormatScore returns a human-readable score summary.
 func (r *ScoreResult) FormatScore() string {
 	b := r.Breakdown
+	coverageStr := "N/A"
+	if b.TestCoverage >= 0 {
+		coverageStr = fmt.Sprintf("%.0f%%", b.TestCoverage*100)
+	}
 	return fmt.Sprintf(
-		"Tech Debt Delta: %+.1f | AI Ratio: %.0f%% | Defects: %.1f/KLOC | Critical: %d | Coverage: %.0f%% | Duplication: %.0f%%",
+		"Tech Debt Delta: %+.1f | AI Ratio: %.0f%% | Defects: %.1f/KLOC | Critical: %d | Coverage: %s | Duplication: %.0f%%",
 		r.TechnicalDebtDelta,
 		b.AICodeRatio*100,
 		b.DefectDensity,
 		b.CriticalIssues,
-		b.TestCoverage*100,
+		coverageStr,
 		b.DuplicationRate*100,
 	)
 }

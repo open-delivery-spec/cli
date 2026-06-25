@@ -447,6 +447,12 @@ func checkInconsistentPattern(file string, lines []string) []Issue {
 	return issues
 }
 
+// ResummarizeSARIF regenerates the Summary string after external issues
+// (e.g. from SARIF) have been merged into the result's Issues slice.
+func ResummarizeSARIF(issues []Issue) string {
+	return summarizeIssues(issues)
+}
+
 // ── Helpers ────────────────────────────────────────────────────
 
 // CriticalCount returns the number of critical + high severity issues.

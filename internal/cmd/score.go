@@ -8,15 +8,17 @@ import (
 	"strings"
 
 	"github.com/open-delivery-spec/cli/internal/analyzer"
+	"github.com/open-delivery-spec/cli/internal/coverage"
 	"github.com/open-delivery-spec/cli/internal/detector"
 	"github.com/open-delivery-spec/cli/internal/scorer"
 	"github.com/spf13/cobra"
 )
 
 var (
-	scoreJSON    bool
-	scoreFormat  string
-	scoreTestDir string
+	scoreJSON         bool
+	scoreFormat       string
+	scoreTestDir      string
+	scoreCoverageFile string
 )
 
 var scoreCmd = &cobra.Command{
@@ -25,10 +27,15 @@ var scoreCmd = &cobra.Command{
 	Long: `Compute the technical debt delta for a code change by combining AI detection,
 quality analysis, test coverage, and duplication signals.
 
+Coverage is auto-detected from common report files (coverage.out, lcov.info,
+coverage.xml, coverage-summary.json). Use --coverage to specify the file
+explicitly, or --test-dir to estimate coverage from test file line counts.
+
 Examples:
-  ods score                       # score the current diff
-  ods score --json                # JSON output
-  ods score --format detail       # detailed breakdown`,
+  ods score                             # score the current diff
+  ods score --json                      # JSON output
+  ods score --format detail             # detailed breakdown
+  ods score --coverage coverage.out     # explicit Go coverage file`,
 	RunE: runScore,
 }
 
@@ -36,7 +43,8 @@ func init() {
 	rootCmd.AddCommand(scoreCmd)
 	scoreCmd.Flags().BoolVar(&scoreJSON, "json", false, "output as JSON")
 	scoreCmd.Flags().StringVar(&scoreFormat, "format", "summary", "output format: summary, detail, json")
-	scoreCmd.Flags().StringVar(&scoreTestDir, "test-dir", "", "test directory path (auto-detected if not set)")
+	scoreCmd.Flags().StringVar(&scoreTestDir, "test-dir", "", "test directory (fallback line-count estimation)")
+	scoreCmd.Flags().StringVar(&scoreCoverageFile, "coverage", "", "coverage report file (auto-detected if not set)")
 }
 
 func runScore(cmd *cobra.Command, args []string) error {
@@ -69,10 +77,26 @@ func runScore(cmd *cobra.Command, args []string) error {
 		totalLines = 1
 	}
 
-	// Count test lines
+	// Detect test coverage from a coverage report file.
+	var covResult coverage.Result
+	if scoreCoverageFile != "" {
+		covResult = coverage.Parse(scoreCoverageFile)
+	} else {
+		covResult = coverage.Detect(".")
+	}
+
+	// Fall back to test-dir line counting when no coverage file is available.
 	testLines := 0
-	if scoreTestDir != "" {
+	if covResult.Coverage < 0 && scoreTestDir != "" {
 		testLines = countTestDirLines(scoreTestDir)
+	}
+
+	var covInput *scorer.CoverageInput
+	if covResult.Coverage >= 0 {
+		covInput = &scorer.CoverageInput{
+			Coverage: covResult.Coverage,
+			Source:   string(covResult.Source),
+		}
 	}
 
 	scoreResult := scorer.Score(scorer.Options{
@@ -80,6 +104,7 @@ func runScore(cmd *cobra.Command, args []string) error {
 		AnalyzerResult:    analyzeResult,
 		TestLines:         testLines,
 		TotalChangedLines: totalLines,
+		CoverageResult:    covInput,
 	})
 
 	switch {
@@ -132,10 +157,14 @@ func printScoreDetail(cmd *cobra.Command, r *scorer.ScoreResult) {
 	fmt.Fprintf(cmd.OutOrStdout(), "Recommendation: %s\n", r.Recommendation)
 	fmt.Fprintln(cmd.OutOrStdout())
 	fmt.Fprintln(cmd.OutOrStdout(), "Breakdown:")
+	coverageStr := "N/A (not measured)"
+	if b.TestCoverage >= 0 {
+		coverageStr = fmt.Sprintf("%.0f%% (source: %s)", b.TestCoverage*100, b.TestCoverageSource)
+	}
 	fmt.Fprintf(cmd.OutOrStdout(), "  AI Code Ratio:      %.0f%%\n", b.AICodeRatio*100)
 	fmt.Fprintf(cmd.OutOrStdout(), "  Defect Density:     %.1f / KLOC\n", b.DefectDensity)
 	fmt.Fprintf(cmd.OutOrStdout(), "  Critical Issues:    %d\n", b.CriticalIssues)
-	fmt.Fprintf(cmd.OutOrStdout(), "  Test Coverage:      %.0f%%\n", b.TestCoverage*100)
+	fmt.Fprintf(cmd.OutOrStdout(), "  Test Coverage:      %s\n", coverageStr)
 	fmt.Fprintf(cmd.OutOrStdout(), "  Duplication Rate:   %.0f%%\n", b.DuplicationRate*100)
 }
 
