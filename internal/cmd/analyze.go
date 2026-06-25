@@ -9,6 +9,7 @@ import (
 
 	"github.com/open-delivery-spec/cli/internal/analyzer"
 	"github.com/open-delivery-spec/cli/internal/detector"
+	"github.com/open-delivery-spec/cli/internal/sarif"
 	"github.com/spf13/cobra"
 )
 
@@ -18,6 +19,7 @@ var (
 	analyzeAIOnly bool
 	analyzeJSON   bool
 	analyzeFormat string
+	analyzeSARIF  string
 )
 
 var analyzeCmd = &cobra.Command{
@@ -30,13 +32,18 @@ var analyzeCmd = &cobra.Command{
   ai-unsafe-deserialization   — json.Unmarshal into interface{}
   ai-inconsistent-pattern     — Mixed naming conventions and indentation
 
+Use --sarif to import findings from external tools (semgrep, CodeQL, etc.)
+and merge them into the ODS issue list. The SARIF file's results are
+converted to ODS severity levels and included in the JSON output.
+
 Use --ai-only to focus analysis on files detected as AI-generated.
 
 Examples:
   ods analyze --file auth.go
   ods analyze --dir ./src
   ods analyze --file handler.go --json
-  ods analyze --dir ./pkg --ai-only`,
+  ods analyze --dir ./pkg --ai-only
+  ods analyze --sarif semgrep.sarif --json`,
 	RunE: runAnalyze,
 }
 
@@ -53,6 +60,8 @@ func init() {
 		"output as JSON")
 	analyzeCmd.Flags().StringVar(&analyzeFormat, "format", "summary",
 		"output format: summary, detail, json")
+	analyzeCmd.Flags().StringVar(&analyzeSARIF, "sarif", "",
+		"SARIF v2.1.0 file to merge into the analysis result")
 }
 
 func runAnalyze(cmd *cobra.Command, args []string) error {
@@ -110,6 +119,17 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	}
 
 	result := analyzer.Analyze(opts)
+
+	// Merge SARIF findings when --sarif is provided.
+	if analyzeSARIF != "" {
+		sarifIssues, err := sarif.Load(analyzeSARIF)
+		if err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: loading SARIF file: %v\n", err)
+		} else {
+			result.Issues = append(result.Issues, sarifIssues...)
+			result.Summary = analyzer.ResummarizeSARIF(result.Issues)
+		}
+	}
 
 	switch {
 	case analyzeJSON || analyzeFormat == "json":

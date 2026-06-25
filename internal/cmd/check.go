@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/open-delivery-spec/cli/internal/analyzer"
+	"github.com/open-delivery-spec/cli/internal/coverage"
 	"github.com/open-delivery-spec/cli/internal/detector"
 	"github.com/open-delivery-spec/cli/internal/policy"
 	"github.com/open-delivery-spec/cli/internal/scorer"
@@ -118,11 +119,23 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		totalLines = 1
 	}
 
+	// Auto-detect coverage report; pass -1 sentinel when not found so the
+	// coverage penalty is not applied to PRs with no coverage tooling.
+	covResult := coverage.Detect(".")
+	var covInput *scorer.CoverageInput
+	if covResult.Coverage >= 0 {
+		covInput = &scorer.CoverageInput{
+			Coverage: covResult.Coverage,
+			Source:   string(covResult.Source),
+		}
+	}
+
 	scoreResult := scorer.Score(scorer.Options{
 		DetectorResult:    detectResult,
 		AnalyzerResult:    analyzeResult,
 		TestLines:         testLines,
 		TotalChangedLines: totalLines,
+		CoverageResult:    covInput,
 	})
 
 	// Build complete list of changed file paths for policy input.
@@ -142,8 +155,11 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		AIConfidence:       detectResult.Confidence,
 		TechnicalDebtDelta: scoreResult.TechnicalDebtDelta,
 		TestCoverage:       scoreResult.Breakdown.TestCoverage,
+		TestCoverageSource: scoreResult.Breakdown.TestCoverageSource,
 		Branch:             detectOpts.BranchName,
 		ChangedFiles:       changedFiles,
+		// _ods_detect_error is not set here — it's added by validate-action when
+		// the detect stage fails, not by the CLI's check command.
 	}
 
 	for _, f := range detectResult.Files {

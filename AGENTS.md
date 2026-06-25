@@ -22,14 +22,67 @@ Complex features (e.g., AutoFix, usage quotas) must have a corresponding markdow
 
 ## Branching Rules
 
-- **NEVER push directly to `main`.** All code must enter `main` via pull request (PR) only. Even when working alone, create a feature branch and open a PR — do not commit or push directly to `main`.
+- **NEVER push directly to `main`.** All code must enter `main` via pull request (PR) only.
+- **Always start from the latest `main`.** Before creating any branch, sync first:
+
+  ```bash
+  git fetch origin
+  git checkout main
+  git pull origin main
+  git checkout -b <branch-name>
+  ```
+
+  Never branch from a stale local `main` or from another feature branch.
+
+- **Branch names must follow Conventional Branch naming.** Allowed prefixes:
+
+  | Prefix | Use for |
+  |--------|---------|
+  | `feat/` | New features |
+  | `fix/` | Bug fixes |
+  | `docs/` | Documentation only |
+  | `chore/` | Maintenance, dependencies |
+  | `ci/` | CI/CD changes |
+  | `refactor/` | Refactoring |
+  | `test/` | Tests only |
+  | `build/` | Build system |
+  | `perf/` | Performance |
+  | `revert/` | Reverting a commit |
+
+  AI-agent branches are also accepted: `claude/`, `copilot/`, `github-actions/`
+
+  Example: `feat/sarif-ingestion`, `fix/coverage-sentinel`, `claude/my-task-id`
+
+  Branch names must be lowercase. The description part must not contain `/`.
+
+## Commit Message Rules
+
+All commits must follow the [Conventional Commits](https://www.conventionalcommits.org/) specification. This is enforced in CI by `commit-check`.
+
+```
+type(scope): description
+```
+
+- **type**: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `chore`, `ci`, `build`, `revert`
+- **scope**: optional, lowercase, no slashes (e.g., `analyzer`, `policy`, `cmd`)
+- **description**: imperative mood, no capital first letter, no trailing period
+- **subject line**: maximum 80 characters
+
+Examples:
+```
+feat: add SARIF ingestion to analyze command
+fix(policy): guard coverage rules against -1 sentinel
+ci: replace hand-rolled checks with commit-check-action
+docs(spec): add conformance test scenarios
+```
 
 ## PR Workflow
 
 - Analyze PRs without pulling locally first
-- If the user approves: create a feature branch, pull PR, rebase on main, apply adjustments, commit, merge into main, push, close PR, and leave a comment
-- **Never open PRs yourself.** Work in feature branches until everything meets requirements, then merge into main and push.
+- If the user approves: create a feature branch from latest `main`, apply changes, commit, push, and open a PR
+- **Do not open PRs without explicit user instruction.**
 - All PRs target `main` branch
+- Before pushing, verify your branch is rebased on the latest `main` (`git rebase origin/main`)
 
 ## Git Rules for Parallel Agents
 

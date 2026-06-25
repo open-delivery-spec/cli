@@ -21,16 +21,19 @@ type EvalResult struct {
 }
 
 // EvalInput is the data passed to Rego policies.
+// TestCoverage is −1 when coverage was not measured; policies that check
+// coverage MUST guard with `input.test_coverage >= 0`.
 type EvalInput struct {
-	AIGenerated         bool               `json:"ai_generated"`
-	AIConfidence        float64            `json:"ai_confidence"`
-	AIFiles             []EvalFileInfo     `json:"ai_files"`
-	Issues              []EvalIssue        `json:"issues"`
-	TechnicalDebtDelta  float64            `json:"technical_debt_delta"`
-	TestCoverage        float64            `json:"test_coverage"`
-	ChangedFiles        []string           `json:"changed_files"`
-	Branch              string             `json:"branch"`
-	Committer           string             `json:"committer"`
+	AIGenerated        bool           `json:"ai_generated"`
+	AIConfidence       float64        `json:"ai_confidence"`
+	AIFiles            []EvalFileInfo `json:"ai_files"`
+	Issues             []EvalIssue    `json:"issues"`
+	TechnicalDebtDelta float64        `json:"technical_debt_delta"`
+	TestCoverage       float64        `json:"test_coverage"`
+	TestCoverageSource string         `json:"test_coverage_source,omitempty"`
+	ChangedFiles       []string       `json:"changed_files"`
+	Branch             string         `json:"branch"`
+	Committer          string         `json:"committer"`
 }
 
 // EvalFileInfo describes an AI-detected file.
@@ -199,8 +202,9 @@ warn[msg] {
 }
 
 warn[msg] {
-    input.test_coverage < 0.3
     input.ai_generated == true
+    input.test_coverage >= 0
+    input.test_coverage < 0.3
     pct := round(input.test_coverage * 100)
     msg = sprintf("AI-generated code has only %d%% test coverage", [pct])
 }
@@ -225,6 +229,7 @@ deny[msg] {
     file := input.ai_files[_]
     regex.match(".*(payment|auth|billing).*", file.path)
     file.confidence > 0.5
+    input.test_coverage >= 0
     input.test_coverage < 0.6
     pct := round(input.test_coverage * 100)
     msg = sprintf("AI code in sensitive module %s has %d%% test coverage (min 60%%)", [file.path, pct])
@@ -240,6 +245,7 @@ deny[msg] {
 warn[msg] {
     input.ai_generated == true
     input.ai_confidence > 0.7
+    input.test_coverage >= 0
     input.test_coverage < 0.2
     ai_pct := round(input.ai_confidence * 100)
     test_pct := round(input.test_coverage * 100)
