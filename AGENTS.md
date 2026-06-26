@@ -34,26 +34,28 @@ Complex features (e.g., AutoFix, usage quotas) must have a corresponding markdow
 
   Never branch from a stale local `main` or from another feature branch.
 
-- **Branch names must follow Conventional Branch naming.** Allowed prefixes:
+- **Branch names must follow [Conventional Branch](https://conventional-branch.github.io/) naming.** Allowed prefixes:
 
   | Prefix | Use for |
   |--------|---------|
-  | `feat/` | New features |
-  | `fix/` | Bug fixes |
-  | `docs/` | Documentation only |
-  | `chore/` | Maintenance, dependencies |
-  | `ci/` | CI/CD changes |
-  | `refactor/` | Refactoring |
-  | `test/` | Tests only |
-  | `build/` | Build system |
-  | `perf/` | Performance |
-  | `revert/` | Reverting a commit |
+  | `feature/` | New features |
+  | `bugfix/` | Bug fixes |
+  | `hotfix/` | Urgent production fixes |
+  | `release/` | Release preparation |
+  | `chore/` | Maintenance, deps, **tests, docs, CI, refactors** |
 
-  AI-agent branches are also accepted: `claude/`, `copilot/`, `github-actions/`
+  AI-agent branches are also accepted: `claude/`, `copilot/`, `cursor/`, `github-actions/`
 
-  Example: `feat/sarif-ingestion`, `fix/coverage-sentinel`, `claude/my-task-id`
+  Long-lived branches: `main`, `master`, `develop`
+
+  Example: `feature/sarif-ingestion`, `bugfix/coverage-sentinel`, `chore/add-tests`, `claude/my-task-id`
 
   Branch names must be lowercase. The description part must not contain `/`.
+
+  > ⚠️ **Conventional _Branch_ types ≠ Conventional _Commit_ types.** Branch names use
+  > `feature/bugfix/hotfix/release/chore`; commit messages use `feat/fix/docs/test/…`.
+  > `test/`, `feat/`, `fix/`, `docs/`, `ci/` are **not** valid branch prefixes and are
+  > rejected by `commit-check`. For test/docs/CI work, branch under `chore/`.
 
 ## Commit Message Rules
 
