@@ -1,0 +1,309 @@
+package cmd
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/open-delivery-spec/cli/internal/analyzer"
+	"github.com/open-delivery-spec/cli/internal/detector"
+	"github.com/open-delivery-spec/cli/internal/policy"
+	"github.com/open-delivery-spec/cli/internal/scorer"
+	"github.com/spf13/cobra"
+)
+
+// bufCmd returns a bare cobra.Command whose stdout/stderr are captured in buf.
+func bufCmd() (*cobra.Command, *bytes.Buffer) {
+	c := &cobra.Command{}
+	buf := &bytes.Buffer{}
+	c.SetOut(buf)
+	c.SetErr(buf)
+	return c, buf
+}
+
+// ─── pure helpers ────────────────────────────────────────────────
+
+func TestSeverityIcon(t *testing.T) {
+	cases := map[string]string{
+		"critical": "🔴",
+		"high":     "🟠",
+		"medium":   "🟡",
+		"low":      "🔵",
+		"info":     "⚪",
+		"unknown":  "⚪",
+	}
+	for sev, want := range cases {
+		if got := severityIcon(sev); got != want {
+			t.Errorf("severityIcon(%q) = %q, want %q", sev, got, want)
+		}
+	}
+}
+
+func TestIsCodeFileExt(t *testing.T) {
+	code := []string{"main.go", "app.py", "index.ts", "Foo.java", "lib.rs", "a.tsx", "x.CPP"}
+	for _, f := range code {
+		if !isCodeFileExt(f) {
+			t.Errorf("isCodeFileExt(%q) = false, want true", f)
+		}
+	}
+	notCode := []string{"README.md", "go.mod", "data.json", "config.yaml", "image.png", "notes.txt"}
+	for _, f := range notCode {
+		if isCodeFileExt(f) {
+			t.Errorf("isCodeFileExt(%q) = true, want false", f)
+		}
+	}
+}
+
+func TestExtractAdded(t *testing.T) {
+	diff := []byte(`diff --git a/x.go b/x.go
+index 111..222 100644
+--- a/x.go
++++ b/x.go
+@@ -1,2 +1,3 @@
+ unchanged line
++added line one
++added line two
+-removed line
+`)
+	got := extractAdded(diff)
+	want := []string{"added line one", "added line two"}
+	if len(got) != len(want) {
+		t.Fatalf("extractAdded returned %d lines, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("line %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestExtractAdded_IgnoresFileHeader(t *testing.T) {
+	// The "+++ b/file" header starts with "++" and must not be treated as added content.
+	diff := []byte("+++ b/x.go\n+real addition\n")
+	got := extractAdded(diff)
+	if len(got) != 1 || got[0] != "real addition" {
+		t.Errorf("extractAdded = %v, want [real addition]", got)
+	}
+}
+
+func TestReadEnvStr(t *testing.T) {
+	t.Setenv("ODS_TEST_VAR", "hello")
+	if got := readEnvStr("ODS_TEST_VAR"); got != "hello" {
+		t.Errorf("readEnvStr = %q, want hello", got)
+	}
+	if got := readEnvStr("ODS_DEFINITELY_UNSET_VAR"); got != "" {
+		t.Errorf("readEnvStr(unset) = %q, want empty", got)
+	}
+}
+
+// ─── filesystem helpers ──────────────────────────────────────────
+
+func TestReadDir(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "a.go"), "package a\nfunc A() {}\n")
+	mustWrite(t, filepath.Join(dir, "sub", "b.py"), "def b():\n    pass\n")
+	mustWrite(t, filepath.Join(dir, "README.md"), "# not code\n")
+	mustWrite(t, filepath.Join(dir, ".hidden", "c.go"), "package c\n") // hidden dir skipped
+
+	files, err := readDir(dir)
+	if err != nil {
+		t.Fatalf("readDir: %v", err)
+	}
+	if _, ok := files[filepath.Join(dir, "a.go")]; !ok {
+		t.Error("expected a.go in results")
+	}
+	if _, ok := files[filepath.Join(dir, "sub", "b.py")]; !ok {
+		t.Error("expected sub/b.py in results")
+	}
+	if _, ok := files[filepath.Join(dir, "README.md")]; ok {
+		t.Error("README.md should be excluded (not a code file)")
+	}
+	if _, ok := files[filepath.Join(dir, ".hidden", "c.go")]; ok {
+		t.Error("files under hidden directories should be skipped")
+	}
+}
+
+func TestCountTestDirLines(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "foo_test.go"), "package foo\n\nfunc TestFoo(t *testing.T) {}\n") // 3 lines
+	mustWrite(t, filepath.Join(dir, "test_bar.py"), "def test_bar():\n    assert True\n")             // 2 lines
+	mustWrite(t, filepath.Join(dir, "main.go"), "package main\n")                                     // not a test file
+
+	n := countTestDirLines(dir)
+	if n < 4 {
+		t.Errorf("countTestDirLines = %d, want >= 4 (test files only)", n)
+	}
+}
+
+// ─── output formatters ───────────────────────────────────────────
+
+func TestPrintAnalyzeSummary_NoIssues(t *testing.T) {
+	c, buf := bufCmd()
+	printAnalyzeSummary(c, &analyzer.AnalysisResult{Summary: "No quality issues detected", Issues: nil})
+	if !strings.Contains(buf.String(), "✅") {
+		t.Errorf("expected success icon, got: %s", buf.String())
+	}
+}
+
+func TestPrintAnalyzeSummary_WithIssues(t *testing.T) {
+	c, buf := bufCmd()
+	res := &analyzer.AnalysisResult{
+		Summary:    "1 issue found",
+		TotalLines: 100,
+		Issues: []analyzer.Issue{
+			{Rule: "ai-over-commenting", File: "x.go", Line: 1, Severity: "high", Message: "too many comments", Suggestion: "remove them"},
+		},
+	}
+	printAnalyzeSummary(c, res)
+	out := buf.String()
+	if !strings.Contains(out, "ai-over-commenting") {
+		t.Errorf("expected rule name in output, got: %s", out)
+	}
+	if !strings.Contains(out, "💡") {
+		t.Errorf("expected suggestion hint, got: %s", out)
+	}
+}
+
+func TestPrintAnalyzeDetail(t *testing.T) {
+	c, buf := bufCmd()
+	res := &analyzer.AnalysisResult{
+		Summary:    "1 issue",
+		TotalLines: 50,
+		Issues: []analyzer.Issue{
+			{Rule: "ai-unsafe-deserialization", File: "y.go", Line: 10, Severity: "critical", Message: "unsafe", Suggestion: "use a struct"},
+		},
+	}
+	printAnalyzeDetail(c, res)
+	out := buf.String()
+	for _, want := range []string{"AI Code Quality Analysis Report", "ai-unsafe-deserialization", "Suggestions:"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("detail output missing %q\n%s", want, out)
+		}
+	}
+}
+
+func TestPrintScoreSummaryAndDetail(t *testing.T) {
+	res := &scorer.ScoreResult{
+		TechnicalDebtDelta: 2.5,
+		Verdict:            "neutral",
+		Recommendation:     "Moderate risk",
+		Breakdown: scorer.ScoreBreakdown{
+			AICodeRatio: 0.5, DefectDensity: 1.0, CriticalIssues: 0,
+			TestCoverage: 0.8, DuplicationRate: 0.1,
+		},
+	}
+
+	c, buf := bufCmd()
+	printScoreSummary(c, res)
+	if !strings.Contains(buf.String(), "neutral") {
+		t.Errorf("summary missing verdict: %s", buf.String())
+	}
+
+	c2, buf2 := bufCmd()
+	printScoreDetail(c2, res)
+	for _, want := range []string{"Technical Debt Score Report", "AI Code Ratio", "Test Coverage"} {
+		if !strings.Contains(buf2.String(), want) {
+			t.Errorf("detail missing %q\n%s", want, buf2.String())
+		}
+	}
+}
+
+func TestPrintCheckResult(t *testing.T) {
+	t.Run("allowed", func(t *testing.T) {
+		c, buf := bufCmd()
+		printCheckResult(c, &policy.EvalResult{Allowed: true}, "", true)
+		out := buf.String()
+		if !strings.Contains(out, "passed") {
+			t.Errorf("expected passed message, got: %s", out)
+		}
+		if !strings.Contains(out, "default (built-in)") {
+			t.Errorf("expected default policy label, got: %s", out)
+		}
+	})
+	t.Run("denied with warnings", func(t *testing.T) {
+		c, buf := bufCmd()
+		res := &policy.EvalResult{
+			Allowed:  false,
+			Denials:  []string{"critical issue found"},
+			Warnings: []string{"low coverage"},
+		}
+		printCheckResult(c, res, ".ods/policy.rego", false)
+		out := buf.String()
+		for _, want := range []string{"failed", "critical issue found", "low coverage", ".ods/policy.rego"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("output missing %q\n%s", want, out)
+			}
+		}
+	})
+}
+
+func TestPrintDetect(t *testing.T) {
+	res := &detector.DetectionResult{
+		AIGenerated: true,
+		Confidence:  0.9,
+		Summary:     "AI code detected",
+		Sources:     []string{"commit-trailer", "branch-name"},
+		Evidence: []detector.Evidence{
+			{Source: "commit-trailer", Value: "Claude", Confidence: 0.95},
+		},
+	}
+
+	c, buf := bufCmd()
+	printSummary(c, res)
+	if !strings.Contains(buf.String(), "AI code detected") {
+		t.Errorf("summary missing detection text: %s", buf.String())
+	}
+
+	c2, buf2 := bufCmd()
+	printDetailed(c2, res)
+	for _, want := range []string{"AI Code Detection Report", "Confidence", "Risk Level: High"} {
+		if !strings.Contains(buf2.String(), want) {
+			t.Errorf("detail missing %q\n%s", want, buf2.String())
+		}
+	}
+}
+
+// ─── default policy evaluation ───────────────────────────────────
+
+func TestEvaluateDefaultPolicy(t *testing.T) {
+	t.Run("clean input allowed", func(t *testing.T) {
+		res, err := evaluateDefaultPolicy(&policy.EvalInput{
+			AIGenerated:  false,
+			TestCoverage: 0.9,
+		})
+		if err != nil {
+			t.Fatalf("evaluateDefaultPolicy: %v", err)
+		}
+		if !res.Allowed {
+			t.Errorf("clean input: allowed = false, want true (denials: %v)", res.Denials)
+		}
+	})
+
+	t.Run("critical issue denied", func(t *testing.T) {
+		res, err := evaluateDefaultPolicy(&policy.EvalInput{
+			Issues: []policy.EvalIssue{
+				{Rule: "ai-unsafe-deserialization", File: "x.go", Line: 1, Severity: "critical", Message: "unsafe"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("evaluateDefaultPolicy: %v", err)
+		}
+		if res.Allowed {
+			t.Errorf("critical issue: allowed = true, want false")
+		}
+	})
+}
+
+// ─── helpers ─────────────────────────────────────────────────────
+
+func mustWrite(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
