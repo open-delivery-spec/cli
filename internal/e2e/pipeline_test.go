@@ -69,6 +69,13 @@ func git(t *testing.T, dir string, args ...string) {
 // so callers parse stdout regardless of the exit code.
 func runODS(t *testing.T, dir string, args ...string) (string, int) {
 	t.Helper()
+	stdout, _, exit := runODSStreams(t, dir, args...)
+	return stdout, exit
+}
+
+// runODSStreams runs the ods binary and returns stdout, stderr, and the exit code.
+func runODSStreams(t *testing.T, dir string, args ...string) (string, string, int) {
+	t.Helper()
 	cmd := exec.Command(odsBin, args...)
 	cmd.Dir = dir
 	cmd.Env = hermeticEnv()
@@ -84,7 +91,7 @@ func runODS(t *testing.T, dir string, args ...string) (string, int) {
 			t.Fatalf("running ods %s: %v\n%s", strings.Join(args, " "), err, stderr.String())
 		}
 	}
-	return stdout.String(), exit
+	return stdout.String(), stderr.String(), exit
 }
 
 // writeFile writes a file relative to dir, creating parent directories.
@@ -225,6 +232,48 @@ func TestPipeline_AICode(t *testing.T) {
 		mustJSON(t, out, &res)
 		if _, ok := res["allowed"]; !ok {
 			t.Errorf("check JSON missing 'allowed' field: %s", out)
+		}
+	})
+}
+
+func TestDebugLogging(t *testing.T) {
+	dir := initRepo(t)
+	writeFile(t, dir, "x.go", "package x\n\nfunc X() {}\n")
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-m", "feat: add x")
+
+	t.Run("no debug: stdout is JSON, stderr has no debug lines", func(t *testing.T) {
+		stdout, stderr, _ := runODSStreams(t, dir, "detect", "--branch", "main", "--json")
+		var res map[string]any
+		mustJSON(t, stdout, &res)
+		if strings.Contains(stderr, "[ods:debug]") {
+			t.Errorf("stderr should have no debug output without --debug:\n%s", stderr)
+		}
+	})
+
+	t.Run("--debug: stdout stays clean JSON, diagnostics go to stderr", func(t *testing.T) {
+		stdout, stderr, _ := runODSStreams(t, dir, "detect", "--branch", "main", "--json", "--debug")
+		// stdout must remain parseable JSON — debug must never leak into it.
+		var res map[string]any
+		mustJSON(t, stdout, &res)
+		if strings.Contains(stdout, "[ods:debug]") {
+			t.Errorf("debug output leaked into stdout:\n%s", stdout)
+		}
+		if !strings.Contains(stderr, "[ods:debug]") {
+			t.Errorf("expected debug output on stderr, got:\n%s", stderr)
+		}
+	})
+
+	t.Run("ODS_DEBUG env enables logging", func(t *testing.T) {
+		cmd := exec.Command(odsBin, "detect", "--branch", "main", "--json")
+		cmd.Dir = dir
+		cmd.Env = append(hermeticEnv(), "ODS_DEBUG=1")
+		var stdout, stderr strings.Builder
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		_ = cmd.Run()
+		if !strings.Contains(stderr.String(), "[ods:debug]") {
+			t.Errorf("ODS_DEBUG=1 should enable debug logging, stderr:\n%s", stderr.String())
 		}
 	})
 }

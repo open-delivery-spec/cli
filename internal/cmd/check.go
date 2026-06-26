@@ -9,6 +9,7 @@ import (
 	"github.com/open-delivery-spec/cli/internal/analyzer"
 	"github.com/open-delivery-spec/cli/internal/coverage"
 	"github.com/open-delivery-spec/cli/internal/detector"
+	"github.com/open-delivery-spec/cli/internal/logx"
 	"github.com/open-delivery-spec/cli/internal/policy"
 	"github.com/open-delivery-spec/cli/internal/scorer"
 	"github.com/spf13/cobra"
@@ -60,6 +61,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	if envBase := os.Getenv("ODS_DIFF_BASE"); envBase != "" {
 		diffBase = envBase
 	}
+	logx.Debugf("check: diff base = %s", diffBase)
 
 	// Discover policy file
 	policyPath := checkPolicyFile
@@ -69,6 +71,11 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	useDefault := false
 	if policyPath == "" {
 		useDefault = true
+	}
+	if useDefault {
+		logx.Debugf("check: no policy file found, using built-in default policy")
+	} else {
+		logx.Debugf("check: using policy file %s", policyPath)
 	}
 
 	// Run detector
@@ -130,6 +137,12 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	logx.Debugf("check: detection ai_generated=%t confidence=%.2f sources=%v",
+		detectResult.AIGenerated, detectResult.Confidence, detectResult.Sources)
+	logx.Debugf("check: analysis issues=%d (changed lines=%d, test lines=%d)",
+		len(analyzeResult.Issues), totalLines, testLines)
+	logx.Debugf("check: coverage source=%s value=%.2f", covResult.Source, covResult.Coverage)
+
 	scoreResult := scorer.Score(scorer.Options{
 		DetectorResult:    detectResult,
 		AnalyzerResult:    analyzeResult,
@@ -137,6 +150,12 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		TotalChangedLines: totalLines,
 		CoverageResult:    covInput,
 	})
+
+	logx.Debugf("check: score delta=%.2f verdict=%s (ai_ratio=%.2f defect_density=%.2f critical=%d coverage=%.2f dup=%.2f)",
+		scoreResult.TechnicalDebtDelta, scoreResult.Verdict,
+		scoreResult.Breakdown.AICodeRatio, scoreResult.Breakdown.DefectDensity,
+		scoreResult.Breakdown.CriticalIssues, scoreResult.Breakdown.TestCoverage,
+		scoreResult.Breakdown.DuplicationRate)
 
 	// Build complete list of changed file paths for policy input.
 	// getAllChangedFiles includes all file types (not just code files), so Rego
@@ -191,6 +210,15 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	}
 	if err != nil {
 		return fmt.Errorf("policy evaluation failed: %w", err)
+	}
+
+	logx.Debugf("check: policy result allowed=%t denials=%d warnings=%d",
+		result.Allowed, len(result.Denials), len(result.Warnings))
+	for _, d := range result.Denials {
+		logx.Debugf("check: DENY %s", d)
+	}
+	for _, w := range result.Warnings {
+		logx.Debugf("check: WARN %s", w)
 	}
 
 	switch {

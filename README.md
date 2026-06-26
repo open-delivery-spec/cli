@@ -235,6 +235,31 @@ Next steps:
 
 ---
 
+## Debugging
+
+Every command accepts a global `--debug` flag (or set `ODS_DEBUG=1`) to print
+decision diagnostics to **stderr**. JSON written to stdout stays clean, so
+`--debug` is safe to combine with `--json` in pipelines.
+
+```bash
+$ ods check --json --debug
+[ods:debug] check: diff base = HEAD~1
+[ods:debug] check: no policy file found, using built-in default policy
+[ods:debug] check: detection ai_generated=true confidence=0.90 sources=[commit-trailer]
+[ods:debug] check: analysis issues=0 (changed lines=2, test lines=0)
+[ods:debug] check: coverage source=unknown value=-1.00
+[ods:debug] check: score delta=0.00 verdict=decrease (ai_ratio=0.00 ...)
+[ods:debug] check: policy result allowed=true denials=0 warnings=0
+{
+  "allowed": true
+}
+```
+
+This answers "why did this PR pass/block?" by exposing the detection signals,
+score breakdown, coverage source, and every policy denial/warning.
+
+---
+
 ## Installation and CI Integration
 
 ### Install

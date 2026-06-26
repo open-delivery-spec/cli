@@ -1,14 +1,19 @@
 package cmd
 
 import (
+	"os"
+
+	"github.com/open-delivery-spec/cli/internal/logx"
 	"github.com/open-delivery-spec/cli/internal/version"
 	"github.com/spf13/cobra"
 )
 
+var debugFlag bool
+
 var rootCmd = &cobra.Command{
 	Use:   "ods",
 	Short: "Open Delivery Spec — AI code quality gate",
-	Long: `ods — Detect AI-generated code, analyze its quality, 
+	Long: `ods — Detect AI-generated code, analyze its quality,
 score technical debt impact, and enforce enterprise policy.
 
 Commands:
@@ -17,8 +22,15 @@ Commands:
   score    Score technical debt impact
   check    Evaluate OPA Rego policy
   hook     Install git hooks
-  init     Scaffold ODS configuration`,
+  init     Scaffold ODS configuration
+
+Use --debug (or set ODS_DEBUG=1) to print decision diagnostics to stderr.`,
 	Version: version.Value,
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		if debugFlag || os.Getenv("ODS_DEBUG") != "" {
+			logx.SetEnabled(true)
+		}
+	},
 }
 
 func Execute() error {
@@ -26,5 +38,7 @@ func Execute() error {
 }
 
 func init() {
+	rootCmd.PersistentFlags().BoolVar(&debugFlag, "debug", false,
+		"enable debug logging to stderr (also via ODS_DEBUG=1)")
 	// Subcommands register themselves via their own init() functions
 }

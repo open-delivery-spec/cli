@@ -9,6 +9,7 @@ import (
 
 	"github.com/open-delivery-spec/cli/internal/analyzer"
 	"github.com/open-delivery-spec/cli/internal/detector"
+	"github.com/open-delivery-spec/cli/internal/logx"
 	"github.com/open-delivery-spec/cli/internal/sarif"
 	"github.com/spf13/cobra"
 )
@@ -118,7 +119,9 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 		Files:  files,
 	}
 
+	logx.Debugf("analyze: scanning %d file(s)", len(files))
 	result := analyzer.Analyze(opts)
+	logx.Debugf("analyze: found %d issue(s) across %d lines", len(result.Issues), result.TotalLines)
 
 	// Merge SARIF findings when --sarif is provided.
 	if analyzeSARIF != "" {
@@ -126,6 +129,7 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: loading SARIF file: %v\n", err)
 		} else {
+			logx.Debugf("analyze: merged %d SARIF finding(s) from %s", len(sarifIssues), analyzeSARIF)
 			result.Issues = append(result.Issues, sarifIssues...)
 			result.Summary = analyzer.ResummarizeSARIF(result.Issues)
 		}
