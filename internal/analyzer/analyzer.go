@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/open-delivery-spec/cli/internal/rules"
 )
 
 // Issue represents a single quality defect found in code.
@@ -157,7 +159,7 @@ func checkRedundantErrorHandling(file string, lines []string) []Issue {
 
 	if denseCount >= 1 {
 		issues = append(issues, Issue{
-			Rule:       "ai-redundant-error-handling",
+			Rule:       rules.RedundantErrorHandling,
 			File:       file,
 			Line:       errBlocks[len(errBlocks)-1] + 1,
 			Severity:   "medium",
@@ -220,7 +222,7 @@ func checkOverCommenting(file string, lines []string) []Issue {
 		}
 
 		issues = append(issues, Issue{
-			Rule:       "ai-over-commenting",
+			Rule:       rules.OverCommenting,
 			File:       file,
 			Line:       1,
 			Severity:   severity,
@@ -293,7 +295,7 @@ func checkMissingEdgeCase(file string, lines []string) []Issue {
 	if len(issues) >= 2 {
 		// Report the first one as a representative
 		return []Issue{{
-			Rule:       "ai-missing-edge-case",
+			Rule:       rules.MissingEdgeCase,
 			File:       file,
 			Line:       issues[0].line,
 			Severity:   "low",
@@ -355,7 +357,7 @@ func checkUnsafeDeserialization(file string, lines []string) []Issue {
 					if strings.Contains(trimmed, "&"+varName) ||
 						strings.Contains(trimmed, "&("+varName+")") {
 						issues = append(issues, Issue{
-							Rule:       "ai-unsafe-deserialization",
+							Rule:       rules.UnsafeDeserialization,
 							File:       file,
 							Line:       i + 1,
 							Severity:   "high",
@@ -419,7 +421,7 @@ func checkInconsistentPattern(file string, lines []string) []Issue {
 		}
 		if total > 5 && float64(minCount)/float64(total) > 0.15 {
 			issues = append(issues, Issue{
-				Rule:       "ai-inconsistent-pattern",
+				Rule:       rules.InconsistentPattern,
 				File:       file,
 				Line:       1,
 				Severity:   "medium",
@@ -434,7 +436,7 @@ func checkInconsistentPattern(file string, lines []string) []Issue {
 		total := tabCount + spaceCount
 		if total > 5 {
 			issues = append(issues, Issue{
-				Rule:       "ai-inconsistent-pattern",
+				Rule:       rules.InconsistentPattern,
 				File:       file,
 				Line:       1,
 				Severity:   "low",

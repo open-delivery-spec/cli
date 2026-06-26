@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/open-delivery-spec/cli/internal/analyzer"
 	"github.com/open-delivery-spec/cli/internal/detector"
 	"github.com/open-delivery-spec/cli/internal/policy"
+	"github.com/open-delivery-spec/cli/internal/rules"
 	"github.com/open-delivery-spec/cli/internal/scorer"
 	"github.com/spf13/cobra"
 )
@@ -294,6 +296,43 @@ func TestEvaluateDefaultPolicy(t *testing.T) {
 			t.Errorf("critical issue: allowed = true, want false")
 		}
 	})
+}
+
+// ─── rules command ───────────────────────────────────────────────
+
+func TestRunRules_Table(t *testing.T) {
+	t.Cleanup(func() { rulesJSON = false })
+	rulesJSON = false
+	c, buf := bufCmd()
+	if err := runRules(c, nil); err != nil {
+		t.Fatalf("runRules: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "ODS Analysis Rules") {
+		t.Errorf("table output missing header: %s", out)
+	}
+	// Every registered rule ID should appear in the table.
+	for _, id := range rules.IDs() {
+		if !strings.Contains(out, id) {
+			t.Errorf("table output missing rule %q", id)
+		}
+	}
+}
+
+func TestRunRules_JSON(t *testing.T) {
+	t.Cleanup(func() { rulesJSON = false })
+	rulesJSON = true
+	c, buf := bufCmd()
+	if err := runRules(c, nil); err != nil {
+		t.Fatalf("runRules: %v", err)
+	}
+	var got []rules.Rule
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("rules --json did not produce valid JSON: %v\n%s", err, buf.String())
+	}
+	if len(got) != len(rules.All()) {
+		t.Errorf("json rules count = %d, want %d", len(got), len(rules.All()))
+	}
 }
 
 // ─── helpers ─────────────────────────────────────────────────────

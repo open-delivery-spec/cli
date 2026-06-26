@@ -233,6 +233,22 @@ Next steps:
 
 `init` is idempotent — existing files are skipped, never overwritten.
 
+### `ods rules` — Rule Catalogue
+
+```bash
+$ ods rules
+ODS Analysis Rules (5)
+
+🟡 [medium] ai-redundant-error-handling
+  Dense clusters of if-err-nil blocks in close proximity — AI tends to over-defend every operation.
+  → Consolidate error handling: use a helper or wrap multiple operations in a single error check.
+...
+```
+
+`ods rules --json` emits the machine-readable catalogue (id, name, description,
+default severity, category, suggestion). It is the single source of truth for
+every rule the analyzer can emit.
+
 ---
 
 ## Debugging
