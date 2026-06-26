@@ -10,6 +10,7 @@ import (
 	"github.com/open-delivery-spec/cli/internal/analyzer"
 	"github.com/open-delivery-spec/cli/internal/coverage"
 	"github.com/open-delivery-spec/cli/internal/detector"
+	"github.com/open-delivery-spec/cli/internal/logx"
 	"github.com/open-delivery-spec/cli/internal/scorer"
 	"github.com/spf13/cobra"
 )
@@ -106,6 +107,12 @@ func runScore(cmd *cobra.Command, args []string) error {
 		TotalChangedLines: totalLines,
 		CoverageResult:    covInput,
 	})
+
+	logx.Debugf("score: delta=%.2f verdict=%s (ai_ratio=%.2f defect_density=%.2f critical=%d coverage=%.2f dup=%.2f)",
+		scoreResult.TechnicalDebtDelta, scoreResult.Verdict,
+		scoreResult.Breakdown.AICodeRatio, scoreResult.Breakdown.DefectDensity,
+		scoreResult.Breakdown.CriticalIssues, scoreResult.Breakdown.TestCoverage,
+		scoreResult.Breakdown.DuplicationRate)
 
 	switch {
 	case scoreJSON || scoreFormat == "json":

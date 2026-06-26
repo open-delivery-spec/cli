@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/open-delivery-spec/cli/internal/detector"
+	"github.com/open-delivery-spec/cli/internal/logx"
 	"github.com/spf13/cobra"
 )
 
@@ -101,9 +102,16 @@ func runDetect(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	logx.Debugf("detect: diff base=%s branch=%q max commits=%d", opts.DiffBase, opts.BranchName, opts.MaxCommits)
+
 	result, err := detector.Detect(opts)
 	if err != nil {
 		return fmt.Errorf("detection failed: %w", err)
+	}
+
+	logx.Debugf("detect: ai_generated=%t confidence=%.2f sources=%v", result.AIGenerated, result.Confidence, result.Sources)
+	for _, ev := range result.Evidence {
+		logx.Debugf("detect: evidence [%s] %s (%.2f)", ev.Source, ev.Value, ev.Confidence)
 	}
 
 	switch {
