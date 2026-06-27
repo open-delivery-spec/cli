@@ -34,7 +34,9 @@ jobs:
           branch: ${{ github.head_ref }}
           # Dogfood the CLI version under test, not main. Otherwise an analyzer
           # behaviour change is judged by the old analyzer it replaces, and any
-          # PR that adjusts the rules can never pass its own gate.
-          cli-ref: ${{ github.head_ref }}
+          # PR that adjusts the rules can never pass its own gate. Use the head
+          # SHA, not the branch name: `go install pkg@branch` rejects refs that
+          # contain a slash (e.g. bugfix/...).
+          cli-ref: ${{ github.event.pull_request.head.sha }}
           summary: 'true'
           comment: 'true'
