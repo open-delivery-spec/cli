@@ -335,6 +335,59 @@ func TestRunRules_JSON(t *testing.T) {
 	}
 }
 
+// TestRunAnalyze_SARIFWithoutLocalCode guards the multi-language path: when
+// --sarif is given but the diff has no analyzable code (e.g. a docs-only PR, or
+// a non-Go repo), analyze must still succeed and emit the external findings
+// rather than erroring with "no input provided".
+func TestRunAnalyze_SARIFWithoutLocalCode(t *testing.T) {
+	t.Cleanup(func() {
+		analyzeSARIF, analyzeJSON, analyzeFile, analyzeDir = "", false, "", ""
+	})
+	dir := t.TempDir()
+	t.Chdir(dir) // not a git repo → default diff path finds no code
+	sarifPath := filepath.Join(dir, "ext.sarif")
+	mustWrite(t, sarifPath, `{
+  "version": "2.1.0",
+  "runs": [{
+    "tool": {"driver": {"name": "semgrep", "rules": [
+      {"id": "ext.rule.injection", "properties": {"severity": "ERROR"}}
+    ]}},
+    "results": [{
+      "ruleId": "ext.rule.injection",
+      "level": "error",
+      "message": {"text": "command injection"},
+      "locations": [{"physicalLocation": {
+        "artifactLocation": {"uri": "app/run.py"},
+        "region": {"startLine": 7}
+      }}]
+    }]
+  }]
+}`)
+	analyzeSARIF = sarifPath
+	analyzeJSON = true
+
+	c, buf := bufCmd()
+	if err := runAnalyze(c, nil); err != nil {
+		t.Fatalf("analyze --sarif with no local code should succeed, got: %v", err)
+	}
+	var res analyzer.AnalysisResult
+	if err := json.Unmarshal(buf.Bytes(), &res); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, buf.String())
+	}
+	found := false
+	for _, iss := range res.Issues {
+		if iss.Rule == "ext.rule.injection" {
+			found = true
+			if iss.Severity != "high" {
+				t.Errorf("severity = %s, want high (error→high)", iss.Severity)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("SARIF finding was not merged; issues=%+v", res.Issues)
+	}
+}
+
 // ─── helpers ─────────────────────────────────────────────────────
 
 func mustWrite(t *testing.T, path, content string) {
