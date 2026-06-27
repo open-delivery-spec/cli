@@ -127,6 +127,70 @@ func TestScoreBreakdown(t *testing.T) {
 	}
 }
 
+// TestScore_CleanAIPRIsLowRisk locks the core of the quality-driven model: a
+// fully AI-written change with no defects and good coverage must score ~0. AI
+// quantity alone must never create technical debt.
+func TestScore_CleanAIPRIsLowRisk(t *testing.T) {
+	t.Setenv("ODS_DIFF_BASE", "HEAD") // diff against HEAD → zero duplication, deterministic
+	res := Score(Options{
+		DetectorResult: &detector.DetectionResult{
+			AIGenerated: true, Confidence: 1.0,
+			Files: []detector.FileDetection{
+				{Path: "a.go", AILines: 100, TotalLines: 100, Confidence: 1.0},
+			},
+		},
+		AnalyzerResult:    &analyzer.AnalysisResult{TotalLines: 100, Issues: nil},
+		TestLines:         90,
+		TotalChangedLines: 100,
+	})
+	if res.Breakdown.AICodeRatio != 1.0 {
+		t.Fatalf("AI ratio = %f, want 1.0", res.Breakdown.AICodeRatio)
+	}
+	if res.Verdict != "decrease" {
+		t.Errorf("clean 100%% AI PR should be low risk, got verdict %q (delta %f)",
+			res.Verdict, res.TechnicalDebtDelta)
+	}
+}
+
+// TestScore_AIRatioAmplifiesButDoesNotCreate verifies AI ratio is a bounded
+// multiplier on real quality debt, not a standalone debt source: the same
+// defect produces debt regardless of authorship, and AI only amplifies it
+// (by at most 1.5x).
+func TestScore_AIRatioAmplifiesButDoesNotCreate(t *testing.T) {
+	t.Setenv("ODS_DIFF_BASE", "HEAD") // zero duplication, deterministic
+	mk := func(aiLines int) *ScoreResult {
+		return Score(Options{
+			DetectorResult: &detector.DetectionResult{
+				AIGenerated: aiLines > 0, Confidence: 1.0,
+				Files: []detector.FileDetection{
+					{Path: "a.go", AILines: aiLines, TotalLines: 100, Confidence: 1.0},
+				},
+			},
+			AnalyzerResult: &analyzer.AnalysisResult{
+				TotalLines: 100,
+				Issues:     []analyzer.Issue{{Rule: "t", Severity: "high", Line: 1}},
+			},
+			TestLines:         100, // coverage 1.0 → no coverage-gap term
+			TotalChangedLines: 100,
+		})
+	}
+	human := mk(0)   // AI ratio 0
+	ai := mk(100)    // AI ratio 1.0
+
+	if human.TechnicalDebtDelta <= 0 {
+		t.Errorf("a real high-severity issue must produce debt regardless of AI, got %f",
+			human.TechnicalDebtDelta)
+	}
+	if ai.TechnicalDebtDelta <= human.TechnicalDebtDelta {
+		t.Errorf("AI ratio should amplify quality debt: ai=%f human=%f",
+			ai.TechnicalDebtDelta, human.TechnicalDebtDelta)
+	}
+	if ai.TechnicalDebtDelta > human.TechnicalDebtDelta*1.5+1e-9 {
+		t.Errorf("amplification must be bounded at 1.5x: ai=%f human=%f",
+			ai.TechnicalDebtDelta, human.TechnicalDebtDelta)
+	}
+}
+
 func TestFormatScore(t *testing.T) {
 	result := Score(Options{
 		DetectorResult: &detector.DetectionResult{
