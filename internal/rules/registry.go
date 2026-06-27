@@ -12,7 +12,6 @@ package rules
 const (
 	RedundantErrorHandling = "ai-redundant-error-handling"
 	OverCommenting         = "ai-over-commenting"
-	MissingEdgeCase        = "ai-missing-edge-case"
 	UnsafeDeserialization  = "ai-unsafe-deserialization"
 	InconsistentPattern    = "ai-inconsistent-pattern"
 )
@@ -32,26 +31,18 @@ var registry = []Rule{
 	{
 		ID:              RedundantErrorHandling,
 		Name:            "Redundant error handling",
-		Description:     "Dense clusters of if-err-nil blocks in close proximity — AI tends to over-defend every operation.",
-		DefaultSeverity: "medium",
+		Description:     "Dense clusters of if-err-nil blocks in close proximity. Informational only — dense error checks are idiomatic Go, not a defect.",
+		DefaultSeverity: "info",
 		Category:        "ai-pattern",
-		Suggestion:      "Consolidate error handling: use a helper or wrap multiple operations in a single error check.",
+		Suggestion:      "If these checks are repetitive boilerplate, consider a helper; otherwise this is normal Go.",
 	},
 	{
 		ID:              OverCommenting,
 		Name:            "Over-commenting",
-		Description:     "Comment-to-code ratio at or above 40% (high at 50%) — excessive commenting is an AI hallmark.",
-		DefaultSeverity: "medium",
+		Description:     "Comment-to-code ratio at or above 40%. Informational only — a style signal, not a defect; documented public APIs legitimately exceed this.",
+		DefaultSeverity: "info",
 		Category:        "ai-pattern",
-		Suggestion:      "Remove self-explanatory comments. Comments should explain why, not what.",
-	},
-	{
-		ID:              MissingEdgeCase,
-		Name:            "Missing edge case",
-		Description:     "Multiple if-statements without else branches — AI focuses on happy paths, missing error/edge cases.",
-		DefaultSeverity: "low",
-		Category:        "ai-pattern",
-		Suggestion:      "Add else/else-if branches to handle edge cases and error conditions explicitly.",
+		Suggestion:      "If comments restate the code, prefer explaining why over what; documentation comments are fine.",
 	},
 	{
 		ID:              UnsafeDeserialization,

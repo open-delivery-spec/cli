@@ -89,9 +89,10 @@ func TestCheckOverCommenting(t *testing.T) {
 		if len(issues) == 0 {
 			t.Fatal("expected over-commenting issue, got none")
 		}
-		// 6 comments + 6 code lines = 50% ratio → "high" severity
-		if issues[0].Severity != "high" {
-			t.Errorf("severity = %s, want high", issues[0].Severity)
+		// Over-commenting is a style hint, always informational — it must never
+		// be promoted to a blocking severity (regression guard).
+		if issues[0].Severity != "info" {
+			t.Errorf("severity = %s, want info", issues[0].Severity)
 		}
 	})
 
@@ -110,56 +111,6 @@ func TestCheckOverCommenting(t *testing.T) {
 		issues := checkOverCommenting("test.go", lines)
 		if len(issues) > 0 {
 			t.Errorf("expected no issues for normal code, got %d", len(issues))
-		}
-	})
-}
-
-func TestCheckMissingEdgeCase(t *testing.T) {
-	t.Run("multiple ifs without else", func(t *testing.T) {
-		lines := []string{
-			"func process(val int) {",
-			"    if val > 0 {",
-			"        fmt.Println(\"positive\")",
-			"    }",
-			"    if val < 0 {",
-			"        fmt.Println(\"negative\")",
-			"    }",
-			"}",
-		}
-		issues := checkMissingEdgeCase("test.go", lines)
-		if len(issues) == 0 {
-			t.Fatal("expected missing-edge-case issue for multiple ifs without else")
-		}
-	})
-
-	t.Run("single if without else", func(t *testing.T) {
-		lines := []string{
-			"func process(val int) {",
-			"    if val > 0 {",
-			"        fmt.Println(\"positive\")",
-			"    }",
-			"}",
-		}
-		issues := checkMissingEdgeCase("test.go", lines)
-		// Single if without else is normal — only flag when multiple
-		if len(issues) > 0 {
-			t.Errorf("expected no issues for single if, got %d", len(issues))
-		}
-	})
-
-	t.Run("if with else", func(t *testing.T) {
-		lines := []string{
-			"func process(val int) {",
-			"    if val > 0 {",
-			"        fmt.Println(\"positive\")",
-			"    } else {",
-			"        fmt.Println(\"non-positive\")",
-			"    }",
-			"}",
-		}
-		issues := checkMissingEdgeCase("test.go", lines)
-		if len(issues) > 0 {
-			t.Errorf("expected no issues for if-else, got %d", len(issues))
 		}
 	})
 }

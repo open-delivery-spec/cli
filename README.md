@@ -128,21 +128,21 @@ $ ods analyze --file internal/scanner/sarif.go --json
       "file": "internal/scanner/sarif.go",
       "line": 42,
       "rule": "ai-over-commenting",
-      "severity": "medium",
-      "message": "Comment-to-code ratio is 47% — exceeds 40% threshold",
-      "suggestion": "Remove self-explanatory inline comments; keep only public API docstrings"
+      "severity": "info",
+      "message": "Comment-to-code ratio is 47%",
+      "suggestion": "If comments restate the code, prefer explaining why over what; documentation comments are fine"
     },
     {
       "file": "internal/scanner/sarif.go",
       "line": 88,
       "rule": "ai-inconsistent-pattern",
-      "severity": "low",
-      "message": "Mixed error wrapping patterns in the same function",
-      "suggestion": "Standardize on fmt.Errorf for all error wrapping"
+      "severity": "medium",
+      "message": "Mixed naming conventions in the same file",
+      "suggestion": "Standardize on one naming convention; run gofmt/prettier"
     }
   ],
   "total_lines": 195,
-  "summary": "2 quality issues found (0 critical, 0 high, 1 medium, 1 low)"
+  "summary": "2 quality issues found (0 critical, 0 high, 1 medium, 0 low, 1 info)"
 }
 ```
 
@@ -237,11 +237,11 @@ Next steps:
 
 ```bash
 $ ods rules
-ODS Analysis Rules (5)
+ODS Analysis Rules (4)
 
-🟡 [medium] ai-redundant-error-handling
-  Dense clusters of if-err-nil blocks in close proximity — AI tends to over-defend every operation.
-  → Consolidate error handling: use a helper or wrap multiple operations in a single error check.
+🔴 [high] ai-unsafe-deserialization
+  json.Unmarshal into interface{} without type validation — AI commonly skips type checking.
+  → Use a concrete struct type or validate the unmarshalled data before use.
 ...
 ```
 
