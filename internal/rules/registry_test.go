@@ -59,7 +59,6 @@ func TestConstantsAreRegistered(t *testing.T) {
 	consts := []string{
 		RedundantErrorHandling,
 		OverCommenting,
-		MissingEdgeCase,
 		UnsafeDeserialization,
 		InconsistentPattern,
 	}

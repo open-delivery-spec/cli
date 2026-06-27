@@ -165,34 +165,70 @@ func estimateDuplication() float64 {
 		return 0
 	}
 
-	lines := strings.Split(string(out), "\n")
-	added := make(map[string]int)
-	totalAdded := 0
-
-	for _, line := range lines {
+	var added []string
+	for _, line := range strings.Split(string(out), "\n") {
 		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "++") {
-			content := line[1:]
-			trimmed := strings.TrimSpace(content)
-			if trimmed == "" || strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "#") {
-				continue
-			}
-			added[trimmed]++
-			totalAdded++
+			added = append(added, line[1:])
 		}
 	}
+	return duplicationRate(added)
+}
 
-	if totalAdded == 0 {
+// minDuplicationLineLen is the minimum trimmed length for a line to count toward
+// duplication. Below this, lines are short boilerplate (return nil, break,
+// continue, case x:) whose repetition says nothing about real copy-paste.
+const minDuplicationLineLen = 12
+
+// isStructuralLine reports whether a line carries no meaningful logic for
+// duplication purposes: blank lines, comments, lines made up solely of
+// structural punctuation (braces/brackets/parens/commas), and very short
+// boilerplate. Counting these inflates the duplication rate on any real diff,
+// where closing braces and trivial returns repeat constantly.
+func isStructuralLine(trimmed string) bool {
+	if trimmed == "" {
+		return true
+	}
+	if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "#") ||
+		strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, "*") {
+		return true
+	}
+	// Lines that are only structural punctuation: } ) ] }) }, etc.
+	if strings.Trim(trimmed, "{}()[],; \t") == "" {
+		return true
+	}
+	if len(trimmed) < minDuplicationLineLen {
+		return true
+	}
+	return false
+}
+
+// duplicationRate estimates the fraction of duplicated *meaningful* lines among
+// the added lines of a diff. Structural and trivial lines are skipped so the
+// metric reflects real copy-paste rather than syntactic repetition.
+//
+// This is a deliberately conservative single-line heuristic; token-window clone
+// detection (or delegating to a dedicated tool) is the planned proper fix.
+func duplicationRate(addedLines []string) float64 {
+	counts := make(map[string]int)
+	total := 0
+	for _, line := range addedLines {
+		trimmed := strings.TrimSpace(line)
+		if isStructuralLine(trimmed) {
+			continue
+		}
+		counts[trimmed]++
+		total++
+	}
+	if total == 0 {
 		return 0
 	}
-
 	duplicates := 0
-	for _, count := range added {
+	for _, count := range counts {
 		if count > 1 {
 			duplicates += count - 1
 		}
 	}
-
-	return float64(duplicates) / float64(totalAdded)
+	return float64(duplicates) / float64(total)
 }
 
 // TrendPoint is a single data point for trend analysis.

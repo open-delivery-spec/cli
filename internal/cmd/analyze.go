@@ -27,11 +27,15 @@ var analyzeCmd = &cobra.Command{
 	Use:   "analyze",
 	Short: "Analyze AI-generated code for quality defects",
 	Long: `Analyze code for known AI-generated quality defects including:
-  ai-redundant-error-handling — Dense clusters of if-err-nil blocks
-  ai-over-commenting          — Comment-to-code ratio >40%
-  ai-missing-edge-case        — if-statements without else branches
-  ai-unsafe-deserialization   — json.Unmarshal into interface{}
-  ai-inconsistent-pattern     — Mixed naming conventions and indentation
+  ai-unsafe-deserialization   — json.Unmarshal into interface{} (high)
+  ai-inconsistent-pattern     — Mixed naming conventions and indentation (medium)
+  ai-redundant-error-handling — Dense clusters of if-err-nil blocks (info)
+  ai-over-commenting          — Comment-to-code ratio >=40% (info)
+
+The built-in heuristics are intentionally conservative: redundant-error-handling
+and over-commenting are informational style hints only and never block a PR.
+For authoritative, multi-language analysis, import findings from dedicated tools
+via --sarif (see below).
 
 Use --sarif to import findings from external tools (semgrep, CodeQL, etc.)
 and merge them into the ODS issue list. The SARIF file's results are

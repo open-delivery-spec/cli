@@ -73,7 +73,6 @@ func Analyze(opts Options) *AnalysisResult {
 		// Run each rule
 		result.Issues = append(result.Issues, checkRedundantErrorHandling(path, lines)...)
 		result.Issues = append(result.Issues, checkOverCommenting(path, lines)...)
-		result.Issues = append(result.Issues, checkMissingEdgeCase(path, lines)...)
 		result.Issues = append(result.Issues, checkUnsafeDeserialization(path, lines)...)
 		result.Issues = append(result.Issues, checkInconsistentPattern(path, lines)...)
 	}
@@ -159,12 +158,14 @@ func checkRedundantErrorHandling(file string, lines []string) []Issue {
 
 	if denseCount >= 1 {
 		issues = append(issues, Issue{
-			Rule:       rules.RedundantErrorHandling,
-			File:       file,
-			Line:       errBlocks[len(errBlocks)-1] + 1,
-			Severity:   "medium",
-			Message:    fmt.Sprintf("%d consecutive error handling blocks within tight proximity — AI over-defends", denseCount+1),
-			Suggestion: "Consolidate error handling: use a helper function or wrap multiple operations in a single error check",
+			Rule:     rules.RedundantErrorHandling,
+			File:     file,
+			Line:     errBlocks[len(errBlocks)-1] + 1,
+			Severity: "info",
+			Message:  fmt.Sprintf("%d consecutive error handling blocks in close proximity", denseCount+1),
+			// Dense `if err != nil` is idiomatic Go, not a defect — surfaced as an
+			// informational hint only, never contributing to the blocking debt score.
+			Suggestion: "If these checks are repetitive boilerplate, consider a helper; otherwise this is normal Go.",
 		})
 	}
 
@@ -214,102 +215,20 @@ func checkOverCommenting(file string, lines []string) []Issue {
 
 	ratio := float64(commentLines) / float64(total)
 	if ratio >= 0.4 {
-		severity := "medium"
-		msg := fmt.Sprintf("Comment-to-code ratio is %.0f%% — AI tends to over-comment", ratio*100)
-		if ratio >= 0.5 {
-			severity = "high"
-			msg = fmt.Sprintf("Comment-to-code ratio is %.0f%% — excessive commenting is an AI hallmark", ratio*100)
-		}
-
+		// Comment density is a style signal, not a defect — well-documented public
+		// APIs (godoc) legitimately exceed 40%. Reported as info only, so it never
+		// inflates defect density or blocks a PR.
 		issues = append(issues, Issue{
 			Rule:       rules.OverCommenting,
 			File:       file,
 			Line:       1,
-			Severity:   severity,
-			Message:    msg,
-			Suggestion: "Remove self-explanatory comments. Comments should explain why, not what — let the code speak for itself.",
+			Severity:   "info",
+			Message:    fmt.Sprintf("Comment-to-code ratio is %.0f%%", ratio*100),
+			Suggestion: "If comments restate the code, prefer explaining why over what; documentation comments are fine.",
 		})
 	}
 
 	return issues
-}
-
-// ── Rule: ai-missing-edge-case ─────────────────────────────────
-
-var (
-	switchPattern  = regexp.MustCompile(`switch\s+(\S+)`)
-	defaultPattern = regexp.MustCompile(`default:`)
-)
-
-func checkMissingEdgeCase(file string, lines []string) []Issue {
-	var issues []issueLoc
-
-	// Check for if-else without else
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "if ") && !strings.Contains(trimmed, ";") {
-			// Simple if check - scan forward to see if there's an else
-			hasElse := false
-			scopeDepth := 0
-			inBlock := false
-			for j := i; j < len(lines) && j < i+20; j++ {
-				t := strings.TrimSpace(lines[j])
-				if j == i {
-					if strings.HasSuffix(t, "{") {
-						inBlock = true
-						scopeDepth = 1
-					}
-					continue
-				}
-				if inBlock {
-					for _, ch := range lines[j] {
-						if ch == '{' {
-							scopeDepth++
-						} else if ch == '}' {
-							scopeDepth--
-						}
-					}
-					if scopeDepth == 0 {
-						// Block ended, check next non-empty
-						for k := j + 1; k < len(lines) && k < j+3; k++ {
-							next := strings.TrimSpace(lines[k])
-							if next == "" {
-								continue
-							}
-							if strings.HasPrefix(next, "else") {
-								hasElse = true
-							}
-							break
-						}
-						break
-					}
-				}
-			}
-			if !hasElse && inBlock {
-				issues = append(issues, issueLoc{line: i + 1, severity: "info"})
-			}
-		}
-	}
-
-	// Only report if there are multiple missing else patterns
-	if len(issues) >= 2 {
-		// Report the first one as a representative
-		return []Issue{{
-			Rule:       rules.MissingEdgeCase,
-			File:       file,
-			Line:       issues[0].line,
-			Severity:   "low",
-			Message:    fmt.Sprintf("%d if-statements without else — AI focuses on happy paths, missing error/edge cases", len(issues)),
-			Suggestion: "Add else/else-if branches to handle edge cases and error conditions explicitly",
-		}}
-	}
-
-	return nil
-}
-
-type issueLoc struct {
-	line     int
-	severity string
 }
 
 // ── Rule: ai-unsafe-deserialization ────────────────────────────

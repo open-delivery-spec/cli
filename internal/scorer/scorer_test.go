@@ -180,3 +180,58 @@ func TestEstimateDuplication(t *testing.T) {
 		t.Errorf("duplication rate = %f, want 0.0-1.0", rate)
 	}
 }
+
+func TestIsStructuralLine(t *testing.T) {
+	structural := []string{
+		"", "   ", "// a comment", "# py comment", "/* block */", "* doc",
+		"}", "})", "},", ")", "]", "{", "});", "return nil", "break",
+		"continue", "default:", "x := 1",
+	}
+	for _, s := range structural {
+		if !isStructuralLine(strings.TrimSpace(s)) {
+			t.Errorf("isStructuralLine(%q) = false, want true", s)
+		}
+	}
+
+	meaningful := []string{
+		"total += item.Price * item.Quantity",
+		"result, err := process(ctx, data)",
+		"if err != nil { return fmt.Errorf(\"x: %w\", err) }",
+	}
+	for _, s := range meaningful {
+		if isStructuralLine(strings.TrimSpace(s)) {
+			t.Errorf("isStructuralLine(%q) = true, want false", s)
+		}
+	}
+}
+
+func TestDuplicationRate(t *testing.T) {
+	t.Run("structural repetition does not count", func(t *testing.T) {
+		// All closing braces / trivial returns: previously inflated to a high
+		// rate; must now be 0 because none are meaningful lines.
+		lines := []string{
+			"func a() error {", "}", "func b() error {", "}",
+			"return nil", "return nil", "}", "}",
+		}
+		if r := duplicationRate(lines); r != 0 {
+			t.Errorf("duplicationRate = %f, want 0 (structural lines excluded)", r)
+		}
+	})
+
+	t.Run("real duplicated lines count", func(t *testing.T) {
+		dup := "user.Roles = append(user.Roles, adminRole)"
+		lines := []string{dup, "x := compute(alpha, beta)", dup, dup}
+		// 4 meaningful lines counted, dup appears 3x → 2 duplicates / 4 total.
+		got := duplicationRate(lines)
+		want := 2.0 / 4.0
+		if got < want-0.001 || got > want+0.001 {
+			t.Errorf("duplicationRate = %f, want ~%f", got, want)
+		}
+	})
+
+	t.Run("no added lines", func(t *testing.T) {
+		if r := duplicationRate(nil); r != 0 {
+			t.Errorf("duplicationRate(nil) = %f, want 0", r)
+		}
+	})
+}
