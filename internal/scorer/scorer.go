@@ -110,18 +110,27 @@ func Score(opts Options) *ScoreResult {
 
 	result.Breakdown = br
 
-	// Compute weighted tech debt delta.
-	// Higher = worse (increasing debt).
-	// Coverage penalty is skipped when coverage was not measured (-1 sentinel)
-	// to avoid false-positive blocks on PRs where no coverage tool is configured.
-	delta := 0.0
-	delta += br.AICodeRatio * 3.0             // AI code weight: 3 (highest concern)
-	delta += br.DefectDensity * 2.0           // Defects weight: 2
-	delta += float64(br.CriticalIssues) * 1.5 // Critical issues: 1.5 each
+	// Technical debt is driven by code *quality*, not by how much of the change
+	// is AI-written. Quality signals (defects, critical issues, coverage gap,
+	// duplication) form the base debt. The AI ratio then acts as a bounded risk
+	// multiplier — AI-authored defects and untested AI code carry more risk
+	// because no human reasoned through them — but AI quantity alone never
+	// creates debt. A clean, fully-AI change scores ~0.
+	//
+	// The coverage-gap term is skipped when coverage was not measured (-1
+	// sentinel) to avoid false-positive blocks where no coverage tool is set up.
+	qualityDebt := 0.0
+	qualityDebt += br.DefectDensity * 2.0           // high/critical defects per KLOC
+	qualityDebt += float64(br.CriticalIssues) * 1.5 // critical + high issues
 	if br.TestCoverage >= 0 {
-		delta += (1.0 - br.TestCoverage) * 1.0 // Low coverage: up to 1.0 penalty
+		qualityDebt += (1.0 - br.TestCoverage) * 1.0 // coverage gap, up to 1.0
 	}
-	delta += br.DuplicationRate * 1.0 // Duplication: 1.0
+	qualityDebt += br.DuplicationRate * 1.0 // duplication
+
+	// AI risk multiplier: 1.0 (no AI) … 1.5 (fully AI). Amplifies real quality
+	// problems for AI-heavy changes without penalizing clean AI code.
+	aiRiskMultiplier := 1.0 + 0.5*br.AICodeRatio
+	delta := qualityDebt * aiRiskMultiplier
 	result.TechnicalDebtDelta = delta
 
 	// Verdict
@@ -134,10 +143,10 @@ func Score(opts Options) *ScoreResult {
 		result.Recommendation = "Moderate risk — review recommended, ensure adequate tests"
 	case delta <= 5.0:
 		result.Verdict = "increase"
-		result.Recommendation = "High risk — add tests, reduce AI contribution ratio, fix critical issues"
+		result.Recommendation = "High risk — add tests and fix high/critical issues"
 	default:
 		result.Verdict = "increase"
-		result.Recommendation = "Block — critical technical debt increase. Address critical issues and add test coverage before merge."
+		result.Recommendation = "Block — critical technical debt increase. Fix high/critical issues and add test coverage before merge."
 	}
 
 	result.FilesAnalyzed = 0
