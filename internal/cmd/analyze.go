@@ -90,9 +90,14 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 		diffFiles, err := getGitDiffFiles("HEAD~1")
 		if err == nil && len(diffFiles) > 0 {
 			files = diffFiles
-		} else {
-			return fmt.Errorf("no input provided: use --file, --dir, or run in a git repo with changes")
+		} else if analyzeSARIF == "" {
+			// No local code to analyze and no external findings to merge.
+			return fmt.Errorf("no input provided: use --file, --dir, --sarif, or run in a git repo with changes")
 		}
+		// Otherwise: no diff code, but --sarif was given — proceed with no local
+		// files and let the SARIF merge below supply the findings. This is the
+		// multi-language path: a PR may touch no analyzable code yet still carry
+		// authoritative findings from an external scanner.
 	}
 
 	// If --ai-only, filter to files detected as AI-generated
