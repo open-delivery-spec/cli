@@ -11,6 +11,7 @@ import (
 	"github.com/open-delivery-spec/cli/internal/coverage"
 	"github.com/open-delivery-spec/cli/internal/detector"
 	"github.com/open-delivery-spec/cli/internal/logx"
+	"github.com/open-delivery-spec/cli/internal/sarif"
 	"github.com/open-delivery-spec/cli/internal/scorer"
 	"github.com/spf13/cobra"
 )
@@ -20,6 +21,7 @@ var (
 	scoreFormat       string
 	scoreTestDir      string
 	scoreCoverageFile string
+	scoreSARIF        string
 )
 
 var scoreCmd = &cobra.Command{
@@ -46,6 +48,7 @@ func init() {
 	scoreCmd.Flags().StringVar(&scoreFormat, "format", "summary", "output format: summary, detail, json")
 	scoreCmd.Flags().StringVar(&scoreTestDir, "test-dir", "", "test directory (fallback line-count estimation)")
 	scoreCmd.Flags().StringVar(&scoreCoverageFile, "coverage", "", "coverage report file (auto-detected if not set)")
+	scoreCmd.Flags().StringVar(&scoreSARIF, "sarif", "", "SARIF v2.1.0 file whose findings are merged into the score")
 }
 
 func runScore(cmd *cobra.Command, args []string) error {
@@ -64,6 +67,18 @@ func runScore(cmd *cobra.Command, args []string) error {
 		analyzeResult = analyzer.Analyze(analyzer.Options{Files: diffFiles})
 	} else {
 		analyzeResult = &analyzer.AnalysisResult{}
+	}
+
+	// Merge external SARIF findings so the debt score reflects authoritative
+	// analyzer results, not just the built-in heuristics.
+	if scoreSARIF != "" {
+		if iss, err := sarif.Load(scoreSARIF); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: loading SARIF file: %v\n", err)
+		} else {
+			analyzeResult.Issues = append(analyzeResult.Issues, iss...)
+			analyzeResult.Summary = analyzer.ResummarizeSARIF(analyzeResult.Issues)
+			logx.Debugf("score: merged %d SARIF finding(s) from %s", len(iss), scoreSARIF)
+		}
 	}
 
 	// Count changed lines

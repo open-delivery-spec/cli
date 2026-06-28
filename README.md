@@ -184,6 +184,7 @@ $ ods score --json
 | `--json` | `false` | JSON output |
 | `--format` | `summary` | Output format: `summary`, `detail`, `json` |
 | `--test-dir` | — | Test directory path (auto-detected) |
+| `--sarif` | — | SARIF file whose findings are merged into the score |
 
 ### `ods check` — Enterprise Policy Enforcement
 
@@ -206,6 +207,7 @@ $ ods check --json
 |------|---------|-------------|
 | `--policy`, `-p` | `.ods/policy.rego` | Path to Rego policy file |
 | `--json` | `false` | JSON output |
+| `--sarif` | — | SARIF file whose findings are merged into the policy input |
 
 ### `ods hook install` — Git Hooks
 

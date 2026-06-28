@@ -25,12 +25,12 @@ type ScoreResult struct {
 
 // ScoreBreakdown provides the dimensional scores.
 type ScoreBreakdown struct {
-	AICodeRatio        float64 `json:"ai_code_ratio"`          // AI lines / total lines
-	DefectDensity      float64 `json:"defect_density"`         // high/critical issues per KLOC
-	CriticalIssues     int     `json:"critical_issues"`        // critical + high severity
-	TestCoverage       float64 `json:"test_coverage"`          // fraction in [0,1] or -1 if not measured
-	TestCoverageSource string  `json:"test_coverage_source"`   // go/lcov/cobertura/nyc/estimated/unknown
-	DuplicationRate    float64 `json:"duplication_rate"`       // estimated duplication
+	AICodeRatio        float64 `json:"ai_code_ratio"`        // AI lines / total lines
+	DefectDensity      float64 `json:"defect_density"`       // high/critical issues per KLOC
+	CriticalIssues     int     `json:"critical_issues"`      // critical + high severity
+	TestCoverage       float64 `json:"test_coverage"`        // fraction in [0,1] or -1 if not measured
+	TestCoverageSource string  `json:"test_coverage_source"` // go/lcov/cobertura/nyc/estimated/unknown
+	DuplicationRate    float64 `json:"duplication_rate"`     // estimated duplication
 }
 
 // Options configures scoring behavior.
@@ -79,9 +79,14 @@ func Score(opts Options) *ScoreResult {
 	// Dimension 2: Defect density using only high/critical issues per KLOC.
 	// Low/medium issues are surfaced as warnings but excluded from the blocking
 	// delta metric because they produce explosive density numbers on small diffs.
-	if opts.AnalyzerResult != nil && opts.AnalyzerResult.TotalLines > 0 {
-		br.DefectDensity = opts.AnalyzerResult.SeverityWeightedDensity()
+	if opts.AnalyzerResult != nil {
+		// Critical/high issues always count toward the gate and score. Defect
+		// density is per-KLOC, so it needs a line count; an ingested SARIF
+		// finding may carry no local lines yet must still register.
 		br.CriticalIssues = opts.AnalyzerResult.CriticalCount()
+		if opts.AnalyzerResult.TotalLines > 0 {
+			br.DefectDensity = opts.AnalyzerResult.SeverityWeightedDensity()
+		}
 	}
 
 	// Dimension 3: Test coverage.

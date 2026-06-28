@@ -11,6 +11,7 @@ import (
 	"github.com/open-delivery-spec/cli/internal/detector"
 	"github.com/open-delivery-spec/cli/internal/logx"
 	"github.com/open-delivery-spec/cli/internal/policy"
+	"github.com/open-delivery-spec/cli/internal/sarif"
 	"github.com/open-delivery-spec/cli/internal/scorer"
 	"github.com/spf13/cobra"
 )
@@ -18,6 +19,7 @@ import (
 var (
 	checkPolicyFile string
 	checkJSON       bool
+	checkSARIF      string
 )
 
 var checkCmd = &cobra.Command{
@@ -51,6 +53,8 @@ func init() {
 	rootCmd.AddCommand(checkCmd)
 	checkCmd.Flags().StringVarP(&checkPolicyFile, "policy", "p", "", "path to Rego policy file")
 	checkCmd.Flags().BoolVar(&checkJSON, "json", false, "output as JSON")
+	checkCmd.Flags().StringVar(&checkSARIF, "sarif", "",
+		"SARIF v2.1.0 file whose findings are merged into the policy input")
 }
 
 func runCheck(cmd *cobra.Command, args []string) error {
@@ -104,6 +108,18 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		analyzeResult = analyzer.Analyze(analyzer.Options{Files: diffFiles})
 	} else {
 		analyzeResult = &analyzer.AnalysisResult{}
+	}
+
+	// Merge external SARIF findings so the policy gate (and the score below) act
+	// on authoritative analyzer results, not just the built-in heuristics.
+	if checkSARIF != "" {
+		if iss, err := sarif.Load(checkSARIF); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: loading SARIF file: %v\n", err)
+		} else {
+			analyzeResult.Issues = append(analyzeResult.Issues, iss...)
+			analyzeResult.Summary = analyzer.ResummarizeSARIF(analyzeResult.Issues)
+			logx.Debugf("check: merged %d SARIF finding(s) from %s", len(iss), checkSARIF)
+		}
 	}
 
 	// Derive TotalChangedLines and TestLines from the actual diff rather than from
