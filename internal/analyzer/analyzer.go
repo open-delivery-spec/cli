@@ -172,20 +172,6 @@ func checkRedundantErrorHandling(file string, lines []string) []Issue {
 	return issues
 }
 
-// isSimpleErrReturn kept for backward compat in tests but logic simplified above.
-func isSimpleErrReturn(lines []string, idx int) bool {
-	for offset := 1; offset <= 4 && idx+offset < len(lines); offset++ {
-		body := strings.TrimSpace(lines[idx+offset])
-		if body == "}" || body == "" {
-			continue
-		}
-		if strings.Contains(body, "return") {
-			return true
-		}
-	}
-	return false
-}
-
 // ── Rule: ai-over-commenting ───────────────────────────────────
 
 func checkOverCommenting(file string, lines []string) []Issue {
@@ -233,10 +219,7 @@ func checkOverCommenting(file string, lines []string) []Issue {
 
 // ── Rule: ai-unsafe-deserialization ────────────────────────────
 
-var (
-	jsonUnmarshalPattern = regexp.MustCompile(`json\.Unmarshal\(`)
-	interfacePattern     = regexp.MustCompile(`interface\{\}`)
-)
+var jsonUnmarshalPattern = regexp.MustCompile(`json\.Unmarshal\(`)
 
 func checkUnsafeDeserialization(file string, lines []string) []Issue {
 	var issues []Issue

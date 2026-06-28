@@ -94,6 +94,29 @@ func TestEvaluateDefaultPolicy(t *testing.T) {
 	})
 }
 
+// enterprisePolicyFixture is a realistic strict policy used to exercise OPA
+// evaluation (sensitive-module gating, coverage thresholds). It mirrors
+// examples/ods-policy-enterprise.rego in the spec repo.
+const enterprisePolicyFixture = `package ods.policy
+
+default allow := true
+
+deny[msg] {
+    issue := input.issues[_]
+    issue.severity == "critical"
+    msg = sprintf("CRITICAL: %s at %s:%d", [issue.rule, issue.file, issue.line])
+}
+
+deny[msg] {
+    file := input.ai_files[_]
+    regex.match(".*(payment|auth|billing).*", file.path)
+    file.confidence > 0.5
+    input.test_coverage >= 0
+    input.test_coverage < 0.6
+    msg = sprintf("AI code in sensitive module %s under 60%% coverage", [file.path])
+}
+`
+
 func TestEvaluateEnterprisePolicy(t *testing.T) {
 	tmpFile, err := os.CreateTemp("", "ods-enterprise-*.rego")
 	if err != nil {
@@ -101,7 +124,7 @@ func TestEvaluateEnterprisePolicy(t *testing.T) {
 	}
 	defer os.Remove(tmpFile.Name())
 
-	if _, err := tmpFile.WriteString(EnterpriseRegoPolicy()); err != nil {
+	if _, err := tmpFile.WriteString(enterprisePolicyFixture); err != nil {
 		t.Fatal(err)
 	}
 	tmpFile.Close()
@@ -195,12 +218,5 @@ func TestDefaultRegoPolicy(t *testing.T) {
 	}
 	if !strings.Contains(policy, "deny") {
 		t.Error("default policy missing deny rules")
-	}
-}
-
-func TestEnterpriseRegoPolicy(t *testing.T) {
-	policy := EnterpriseRegoPolicy()
-	if !strings.Contains(policy, "payment|auth|billing") {
-		t.Error("enterprise policy missing sensitive module check")
 	}
 }

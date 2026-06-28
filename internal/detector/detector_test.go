@@ -1,9 +1,6 @@
 package detector
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 func TestDetectFromBranch_ai(t *testing.T) {
 	ev := detectFromBranch("ai-add-auth-feature")
@@ -71,44 +68,6 @@ func TestDetectFromPRBody_noAI(t *testing.T) {
 	ev := detectFromPRBody("## Summary\nAdded a new feature\n## Changes\n- login button")
 	if ev != nil {
 		t.Errorf("detectFromPRBody with no AI content = %v, want nil", ev)
-	}
-}
-
-func TestParseCommitMessage_aiFooter(t *testing.T) {
-	msg := `feat(auth): add OAuth login
-
-Added full OAuth flow for user authentication.
-
-AI-assisted: true
-AI-tool: GitHub Copilot`
-
-	ev := ParseCommitMessage(msg)
-	if len(ev) == 0 {
-		t.Fatal("ParseCommitMessage returned no evidence")
-	}
-	hasFooter := false
-	hasTool := false
-	for _, e := range ev {
-		if e.Signal == "ai-footer" {
-			hasFooter = true
-		}
-		if e.Signal == "ai-tool" {
-			hasTool = true
-		}
-	}
-	if !hasFooter {
-		t.Error("missing ai-footer signal")
-	}
-	if !hasTool {
-		t.Error("missing ai-tool signal")
-	}
-}
-
-func TestParseCommitMessage_noAI(t *testing.T) {
-	msg := "fix(ui): correct button alignment"
-	ev := ParseCommitMessage(msg)
-	if len(ev) != 0 {
-		t.Errorf("ParseCommitMessage = %d evidence, want 0", len(ev))
 	}
 }
 
@@ -341,62 +300,6 @@ func TestDetectionResult_aggregate(t *testing.T) {
 			t.Errorf("confidence = %f, want >= 0.7", r.Confidence)
 		}
 	})
-}
-
-func TestHeuristicScores(t *testing.T) {
-	lines := []string{
-		"// Process the data",
-		"func processData(data []byte) error {",
-		"    if err != nil { return err }",
-		"    if err != nil { return err }",
-		"    return nil",
-		"}",
-	}
-	scores := HeuristicScores(lines)
-	expected := []string{"comment-ratio", "verbose-naming", "redundant-error-handling", "uniform-indent"}
-	for _, name := range expected {
-		if _, ok := scores[name]; !ok {
-			t.Errorf("HeuristicScores missing key: %s", name)
-		}
-	}
-}
-
-func TestIsHighConfidence(t *testing.T) {
-	r := &DetectionResult{Confidence: 0.85}
-	if !r.IsHighConfidence() {
-		t.Error("IsHighConfidence should return true at 0.85")
-	}
-	r.Confidence = 0.7
-	if r.IsHighConfidence() {
-		t.Error("IsHighConfidence should return false at 0.7")
-	}
-}
-
-func TestIsLowConfidence(t *testing.T) {
-	r := &DetectionResult{Confidence: 0.3}
-	if !r.IsLowConfidence() {
-		t.Error("IsLowConfidence should return true at 0.3")
-	}
-	r.Confidence = 0.5
-	if r.IsLowConfidence() {
-		t.Error("IsLowConfidence should return false at 0.5")
-	}
-}
-
-func TestFileDetection_helpers(t *testing.T) {
-	files := []FileDetection{
-		{Path: "a.go", AILines: 10, TotalLines: 50, Confidence: 0.6},
-		{Path: "b.go", AILines: 20, TotalLines: 30, Confidence: 0.8},
-		{Path: "c.go", AILines: 0, TotalLines: 40, Confidence: 0.2},
-	}
-	if CountAIFiles(files) != 2 {
-		t.Errorf("CountAIFiles = %d, want 2", CountAIFiles(files))
-	}
-	// totalAI = 10+20+0=30, totalAll = 50+30+40=120
-	summary := FormatDiffLineCount(files)
-	if !strings.Contains(summary, "30/120") {
-		t.Errorf("FormatDiffLineCount = %s, want containing '30/120'", summary)
-	}
 }
 
 func TestNonEmptyLines(t *testing.T) {

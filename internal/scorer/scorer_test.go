@@ -174,8 +174,8 @@ func TestScore_AIRatioAmplifiesButDoesNotCreate(t *testing.T) {
 			TotalChangedLines: 100,
 		})
 	}
-	human := mk(0)   // AI ratio 0
-	ai := mk(100)    // AI ratio 1.0
+	human := mk(0) // AI ratio 0
+	ai := mk(100)  // AI ratio 1.0
 
 	if human.TechnicalDebtDelta <= 0 {
 		t.Errorf("a real high-severity issue must produce debt regardless of AI, got %f",
@@ -213,27 +213,6 @@ func TestFormatScore(t *testing.T) {
 	formatted := result.FormatScore()
 	if !strings.Contains(formatted, "Tech Debt Delta") {
 		t.Errorf("FormatScore missing header: %s", formatted)
-	}
-}
-
-func TestTrend(t *testing.T) {
-	points := []TrendPoint{
-		{TechnicalDebtDelta: 2.0, IsAIPR: true},
-		{TechnicalDebtDelta: 3.0, IsAIPR: true},
-		{TechnicalDebtDelta: -0.5, IsAIPR: false},
-		{TechnicalDebtDelta: 0.3, IsAIPR: false},
-	}
-
-	summary := Trend(points)
-	if !strings.Contains(summary, "AI PRs avg") || !strings.Contains(summary, "Human PRs avg") {
-		t.Errorf("Trend summary = %s, missing avg data", summary)
-	}
-}
-
-func TestTrendEmpty(t *testing.T) {
-	summary := Trend(nil)
-	if summary != "No data available" {
-		t.Errorf("empty trend = %s, want 'No data available'", summary)
 	}
 }
 

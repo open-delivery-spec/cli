@@ -8,15 +8,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/open-policy-agent/opa/rego"
 )
 
 // EvalResult is the output of a policy evaluation.
 type EvalResult struct {
-	Allowed bool     `json:"allowed"`
-	Denials []string `json:"denials,omitempty"`
+	Allowed  bool     `json:"allowed"`
+	Denials  []string `json:"denials,omitempty"`
 	Warnings []string `json:"warnings,omitempty"`
 }
 
@@ -38,10 +37,10 @@ type EvalInput struct {
 
 // EvalFileInfo describes an AI-detected file.
 type EvalFileInfo struct {
-	Path        string  `json:"path"`
-	AILines     int     `json:"ai_lines"`
-	TotalLines  int     `json:"total_lines"`
-	Confidence  float64 `json:"confidence"`
+	Path       string  `json:"path"`
+	AILines    int     `json:"ai_lines"`
+	TotalLines int     `json:"total_lines"`
+	Confidence float64 `json:"confidence"`
 }
 
 // EvalIssue represents a quality issue.
@@ -211,55 +210,6 @@ warn[msg] {
 `
 }
 
-// EnterpriseRegoPolicy returns an enterprise-grade policy example.
-func EnterpriseRegoPolicy() string {
-	return `package ods.policy
-
-default allow := true
-
-# Rule 1: Block critical issues unconditionally
-deny[msg] {
-    issue := input.issues[_]
-    issue.severity == "critical"
-    msg = sprintf("CRITICAL: %s at %s:%d — %s", [issue.rule, issue.file, issue.line, issue.message])
-}
-
-# Rule 2: Payment/auth module AI code requires L3-equivalent review (test coverage ≥ 60%)
-deny[msg] {
-    file := input.ai_files[_]
-    regex.match(".*(payment|auth|billing).*", file.path)
-    file.confidence > 0.5
-    input.test_coverage >= 0
-    input.test_coverage < 0.6
-    pct := round(input.test_coverage * 100)
-    msg = sprintf("AI code in sensitive module %s has %d%% test coverage (min 60%%)", [file.path, pct])
-}
-
-# Rule 3: Block high tech debt delta
-deny[msg] {
-    input.technical_debt_delta > 5.0
-    msg = sprintf("Technical debt increase %.1f exceeds block threshold", [input.technical_debt_delta * 1.0])
-}
-
-# Rule 4: Warn on high-confidence AI with no tests
-warn[msg] {
-    input.ai_generated == true
-    input.ai_confidence > 0.7
-    input.test_coverage >= 0
-    input.test_coverage < 0.2
-    ai_pct := round(input.ai_confidence * 100)
-    test_pct := round(input.test_coverage * 100)
-    msg = sprintf("High-confidence AI code (%d%%) with low test coverage (%d%%)", [ai_pct, test_pct])
-}
-
-# Rule 5: Warn on high defect density
-warn[msg] {
-    count(input.issues) > 5
-    msg = sprintf("High defect count: %d issues found", [count(input.issues)])
-}
-`
-}
-
 // DiscoverRegoFile finds a Rego policy file in the repository.
 func DiscoverRegoFile(repoRoot string) string {
 	paths := []string{
@@ -274,22 +224,3 @@ func DiscoverRegoFile(repoRoot string) string {
 	}
 	return ""
 }
-
-// buildInputsMap is a helper for tests.
-func buildInputsMap(input *EvalInput) map[string]interface{} {
-	// Simple map construction for basic inputs
-	return map[string]interface{}{
-		"input": map[string]interface{}{
-			"ai_generated":          input.AIGenerated,
-			"ai_confidence":         input.AIConfidence,
-			"technical_debt_delta":  input.TechnicalDebtDelta,
-			"test_coverage":         input.TestCoverage,
-			"branch":                input.Branch,
-			"committer":             input.Committer,
-			"changed_files":         input.ChangedFiles,
-		},
-	}
-}
-
-// Ensure strings package is used
-var _ = strings.TrimSpace
