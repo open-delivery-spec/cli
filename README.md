@@ -1,6 +1,6 @@
 # ODS CLI
 
-> **Zero-config AI code detection for teams using Claude Code, Copilot, or Cursor.** These tools already write `Co-Authored-By` trailers to every commit. ODS reads them automatically in CI — detecting AI-generated code, analyzing quality, scoring technical debt, and enforcing policy on every PR.
+> **Zero-config AI code quality gate for teams using Claude Code, Copilot, or Cursor.** These tools already stamp `Co-Authored-By` trailers on every commit, so ODS attributes AI-generated code automatically in CI — then analyzes quality, scores technical debt, and enforces policy on every PR. No disclosure forms, no manual tagging.
 
 [![CI](https://github.com/open-delivery-spec/cli/actions/workflows/ci.yml/badge.svg)](https://github.com/open-delivery-spec/cli/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://go.dev)
@@ -62,11 +62,11 @@ ods check
 
 ## Command Reference with Real Output
 
-### `ods detect` — AI Code Detection
+### `ods detect` — AI Code Attribution
 
-Detects AI-generated code using `Co-Authored-By` trailers, commit `AI-assisted:` footers, branch names, PR disclosure, and diff heuristics.
+Attributes AI-generated code using `Co-Authored-By` trailers, commit `AI-assisted:` footers, branch names, PR disclosure, and diff heuristics.
 
-`Co-Authored-By` trailers emitted by Claude Code, GitHub Copilot, and Cursor are the **primary** signal — no additional configuration needed.
+`Co-Authored-By` trailers emitted by Claude Code, GitHub Copilot, and Cursor are the **primary** signal — no additional configuration needed. This is attribution from signals the tools volunteer, not forensic detection: stripping the trailer evades it, and the diff heuristics are only a low-confidence fallback.
 
 ```bash
 $ ods detect --diff-base origin/main --branch feature/ai-oauth
