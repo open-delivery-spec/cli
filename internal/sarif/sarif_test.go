@@ -373,3 +373,80 @@ func TestCoalesceString(t *testing.T) {
 		t.Errorf("coalesceString = %q, want empty", got)
 	}
 }
+
+// realSemgrepSARIF mirrors what `semgrep --sarif` actually emits: the result has
+// NO level, and severity lives in the rule's defaultConfiguration.level.
+const realSemgrepSARIF = `{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "semgrep",
+          "rules": [
+            {
+              "id": "python.subprocess-shell-true",
+              "defaultConfiguration": {"level": "error"},
+              "properties": {"precision": "very-high"}
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "python.subprocess-shell-true",
+          "message": {"text": "shell=True on untrusted input"},
+          "locations": [
+            {"physicalLocation": {"artifactLocation": {"uri": "app/runner.py"}, "region": {"startLine": 11}}}
+          ]
+        }
+      ]
+    }
+  ]
+}`
+
+func TestLoad_DefaultConfigurationLevel(t *testing.T) {
+	issues, err := Load(writeTemp(t, realSemgrepSARIF))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("len(issues) = %d, want 1", len(issues))
+	}
+	// error in defaultConfiguration must map to high (not info).
+	if issues[0].Severity != "high" {
+		t.Errorf("Severity = %q, want high (from defaultConfiguration.level=error)", issues[0].Severity)
+	}
+}
+
+func TestLoad_SecuritySeverityScore(t *testing.T) {
+	doc := `{
+  "version": "2.1.0",
+  "runs": [{
+    "tool": {"driver": {"name": "codeql", "rules": [
+      {"id": "js/sql-injection", "properties": {"security-severity": "9.8"}}
+    ]}},
+    "results": [{
+      "ruleId": "js/sql-injection",
+      "message": {"text": "SQL injection"},
+      "locations": [{"physicalLocation": {"artifactLocation": {"uri": "a.js"}, "region": {"startLine": 1}}}]
+    }]
+  }]
+}`
+	issues, err := Load(writeTemp(t, doc))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(issues) != 1 || issues[0].Severity != "critical" {
+		t.Fatalf("severity = %v, want critical (security-severity 9.8)", issues)
+	}
+}
+
+func TestSecurityScoreToODS(t *testing.T) {
+	cases := map[string]string{"9.9": "critical", "7.0": "high", "4.5": "medium", "1.0": "low", "0": "info", "bad": "info"}
+	for in, want := range cases {
+		if got := securityScoreToODS(in); got != want {
+			t.Errorf("securityScoreToODS(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
