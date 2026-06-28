@@ -388,6 +388,102 @@ func TestRunAnalyze_SARIFWithoutLocalCode(t *testing.T) {
 	}
 }
 
+// TestRunCheck_SARIFReachesPolicy proves external SARIF findings reach the
+// policy gate: a high-severity SARIF finding plus a policy that denies on high
+// severity must block, even when there is no local code to analyze.
+func TestRunCheck_SARIFReachesPolicy(t *testing.T) {
+	t.Cleanup(func() { checkSARIF, checkPolicyFile, checkJSON = "", "", false })
+	dir := t.TempDir()
+	t.Chdir(dir) // non-git → no built-in issues; the SARIF must carry the finding
+	sarifPath := filepath.Join(dir, "ext.sarif")
+	mustWrite(t, sarifPath, `{
+  "version": "2.1.0",
+  "runs": [{
+    "tool": {"driver": {"name": "semgrep"}},
+    "results": [{
+      "ruleId": "ext.rule.injection",
+      "level": "error",
+      "message": {"text": "command injection"},
+      "locations": [{"physicalLocation": {
+        "artifactLocation": {"uri": "app/run.py"}, "region": {"startLine": 7}
+      }}]
+    }]
+  }]
+}`)
+	policyPath := filepath.Join(dir, "policy.rego")
+	mustWrite(t, policyPath, `package ods.policy
+default allow := true
+deny[msg] {
+    issue := input.issues[_]
+    issue.severity == "high"
+    msg := sprintf("%s at %s:%d", [issue.rule, issue.file, issue.line])
+}`)
+	checkSARIF = sarifPath
+	checkPolicyFile = policyPath
+	checkJSON = true
+
+	c, buf := bufCmd()
+	if err := runCheck(c, nil); err == nil {
+		t.Fatalf("expected a policy denial, got nil; out=%s", buf.String())
+	}
+	var res policy.EvalResult
+	if err := json.Unmarshal(buf.Bytes(), &res); err != nil {
+		t.Fatalf("check output not valid JSON: %v\n%s", err, buf.String())
+	}
+	if res.Allowed {
+		t.Errorf("expected allowed=false from a high SARIF finding, got true")
+	}
+	found := false
+	for _, d := range res.Denials {
+		if strings.Contains(d, "ext.rule.injection") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("denials %v should reference the SARIF rule id", res.Denials)
+	}
+}
+
+// TestRunScore_SARIFCountsAsCritical proves SARIF high/critical findings feed
+// the debt score (CriticalIssues), not just the analyze report.
+func TestRunScore_SARIFCountsAsCritical(t *testing.T) {
+	t.Cleanup(func() { scoreSARIF, scoreJSON = "", false })
+	dir := t.TempDir()
+	t.Chdir(dir)
+	sarifPath := filepath.Join(dir, "ext.sarif")
+	mustWrite(t, sarifPath, `{
+  "version": "2.1.0",
+  "runs": [{
+    "tool": {"driver": {"name": "semgrep"}},
+    "results": [{
+      "ruleId": "ext.rule.injection",
+      "level": "error",
+      "message": {"text": "command injection"},
+      "locations": [{"physicalLocation": {
+        "artifactLocation": {"uri": "app/run.py"}, "region": {"startLine": 7}
+      }}]
+    }]
+  }]
+}`)
+	scoreSARIF = sarifPath
+	scoreJSON = true
+
+	c, buf := bufCmd()
+	if err := runScore(c, nil); err != nil {
+		t.Fatalf("runScore: %v", err)
+	}
+	var res scorer.ScoreResult
+	if err := json.Unmarshal(buf.Bytes(), &res); err != nil {
+		t.Fatalf("score output not valid JSON: %v\n%s", err, buf.String())
+	}
+	if res.Breakdown.CriticalIssues < 1 {
+		t.Errorf("critical_issues = %d, want >= 1 from a high SARIF finding", res.Breakdown.CriticalIssues)
+	}
+	if res.TechnicalDebtDelta <= 0 {
+		t.Errorf("delta = %f, want > 0 from a high SARIF finding", res.TechnicalDebtDelta)
+	}
+}
+
 // ─── helpers ─────────────────────────────────────────────────────
 
 func mustWrite(t *testing.T, path, content string) {
