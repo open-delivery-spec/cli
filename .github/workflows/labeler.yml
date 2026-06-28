@@ -1,0 +1,14 @@
+name: PR Auto-labeler
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions: {}
+
+jobs:
+  label-pr:
+    permissions:
+      pull-requests: write
+      contents: read
+    uses: open-delivery-spec/.github/.github/workflows/pr-labeler.yml@main
