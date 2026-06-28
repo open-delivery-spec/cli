@@ -245,47 +245,6 @@ func duplicationRate(addedLines []string) float64 {
 	return float64(duplicates) / float64(total)
 }
 
-// TrendPoint is a single data point for trend analysis.
-type TrendPoint struct {
-	Date               string  `json:"date"`
-	TechnicalDebtDelta float64 `json:"technical_debt_delta"`
-	IsAIPR             bool    `json:"is_ai_pr"`
-}
-
-// Trend computes a trend over multiple PRs.
-func Trend(points []TrendPoint) string {
-	if len(points) == 0 {
-		return "No data available"
-	}
-
-	aiSum := 0.0
-	aiCount := 0
-	humanSum := 0.0
-	humanCount := 0
-
-	for _, p := range points {
-		if p.IsAIPR {
-			aiSum += p.TechnicalDebtDelta
-			aiCount++
-		} else {
-			humanSum += p.TechnicalDebtDelta
-			humanCount++
-		}
-	}
-
-	aiAvg := 0.0
-	if aiCount > 0 {
-		aiAvg = aiSum / float64(aiCount)
-	}
-	humanAvg := 0.0
-	if humanCount > 0 {
-		humanAvg = humanSum / float64(humanCount)
-	}
-
-	return fmt.Sprintf("AI PRs avg: +%.1f tech debt | Human PRs avg: %.1f | Delta: %+.1f (over %d PRs)",
-		aiAvg, humanAvg, aiAvg-humanAvg, len(points))
-}
-
 // FormatScore returns a human-readable score summary.
 func (r *ScoreResult) FormatScore() string {
 	b := r.Breakdown

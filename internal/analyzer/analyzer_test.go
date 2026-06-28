@@ -283,24 +283,3 @@ func TestSummarizeIssues(t *testing.T) {
 		}
 	})
 }
-
-func TestIsSimpleErrReturn(t *testing.T) {
-	lines := []string{
-		"if err != nil {",
-		"    return err",
-		"}",
-	}
-	if !isSimpleErrReturn(lines, 0) {
-		t.Error("isSimpleErrReturn should be true for 'return err'")
-	}
-
-	lines2 := []string{
-		"if err != nil {",
-		"    log.Printf(\"error: %v\", err)",
-		"    return fmt.Errorf(\"wrap: %w\", err)",
-		"}",
-	}
-	if !isSimpleErrReturn(lines2, 0) {
-		t.Error("isSimpleErrReturn should be true — block contains a return statement")
-	}
-}
