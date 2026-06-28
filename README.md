@@ -249,6 +249,36 @@ ODS Analysis Rules (4)
 default severity, category, suggestion). It is the single source of truth for
 every rule the analyzer can emit.
 
+### `ods report` — AI Attribution Report
+
+A governance view over recent history: how much delivered work is AI-assisted,
+and trending which way. Attribution comes from the `Co-Authored-By` trailers AI
+tools emit automatically — the same signal as `ods detect`.
+
+```bash
+$ ods report --since "90 days ago"
+ODS AI Attribution Report — since 90 days ago
+
+  Commits:        64 total · 5 AI-assisted (8%) · 59 human
+  Changed lines:  30056 total · 1697 AI-assisted (6%)
+
+  By tool:
+    Claude               3 commit(s)
+    Claude Sonnet 4.6    2 commit(s)
+
+64 commit(s): 5 AI-assisted (8%), 59 human — AI touched 6% of changed lines
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--since` | `90 days ago` | History window (any git `--since` expression) |
+| `--max-commits` | `0` | Cap commits scanned (0 = no cap) |
+| `--json` | `false` | Machine-readable output (commit/line shares, per-tool counts) |
+
+This is attribution, not forensic detection: it counts what the tools disclose.
+Coverage/quality history is not reconstructable from git alone, so the report
+focuses on the signals git carries reliably — AI share of commits and churn.
+
 ---
 
 ## Debugging

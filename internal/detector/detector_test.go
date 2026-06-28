@@ -414,3 +414,23 @@ func TestSplitCommits(t *testing.T) {
 		t.Fatal("splitCommits returned no commits")
 	}
 }
+
+func TestAITrailerTool(t *testing.T) {
+	cases := []struct {
+		name, msg, want string
+	}{
+		{"claude co-author", "feat: x\n\nCo-Authored-By: Claude <noreply@anthropic.com>", "Claude"},
+		{"copilot co-author", "fix: y\n\nCo-Authored-By: GitHub Copilot <copilot@github.com>", "GitHub Copilot"},
+		{"ai-tool trailer", "chore: z\n\nAI-tool: Cursor", "Cursor"},
+		{"ai-assisted bare", "docs: d\n\nAI-assisted: true", "AI"},
+		{"human", "feat: human change\n\nCo-Authored-By: Jane Dev <jane@example.com>", ""},
+		{"empty", "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := AITrailerTool(c.msg); got != c.want {
+				t.Errorf("AITrailerTool(%q) = %q, want %q", c.msg, got, c.want)
+			}
+		})
+	}
+}

@@ -195,6 +195,34 @@ func isAICoAuthor(line string) bool {
 	return false
 }
 
+// AITrailerTool reports the AI tool attributed in a commit message via its
+// Co-Authored-By or ODS (`AI-tool:`, `AI-assisted: true`) trailers. It returns
+// the tool's display name (e.g. "Claude", "GitHub Copilot"), the generic "AI"
+// when attribution is present but unnamed, or "" when the message shows no AI
+// attribution. This is the building block for AI-vs-human reporting.
+func AITrailerTool(message string) string {
+	for _, line := range strings.Split(message, "\n") {
+		line = strings.TrimSpace(line)
+		if isAICoAuthor(line) {
+			if tool := extractCoAuthorTool(line); tool != "" {
+				return tool
+			}
+			return "AI"
+		}
+		lower := strings.ToLower(line)
+		if strings.HasPrefix(lower, "ai-tool:") {
+			if tool := strings.TrimSpace(line[len("ai-tool:"):]); tool != "" {
+				return tool
+			}
+			return "AI"
+		}
+		if strings.EqualFold(line, "ai-assisted: true") || strings.EqualFold(line, "ai-generated: true") {
+			return "AI"
+		}
+	}
+	return ""
+}
+
 // extractCoAuthorTool extracts the display name from a Co-Authored-By trailer.
 func extractCoAuthorTool(line string) string {
 	lower := strings.ToLower(strings.TrimSpace(line))
