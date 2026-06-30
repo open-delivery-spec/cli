@@ -50,8 +50,8 @@ Examples:
 func init() {
 	rootCmd.AddCommand(detectCmd)
 
-	detectCmd.Flags().StringVar(&detectDiffBase, "diff-base", "HEAD~1",
-		"git ref to diff against (e.g., origin/main, HEAD~3)")
+	detectCmd.Flags().StringVar(&detectDiffBase, "diff-base", "",
+		"git ref to diff against (default: $ODS_DIFF_BASE or HEAD~1)")
 	detectCmd.Flags().StringVar(&detectPRBody, "pr-body", "",
 		"PR description body text")
 	detectCmd.Flags().StringVar(&detectPRFile, "pr-file", "",
@@ -68,7 +68,7 @@ func init() {
 
 func runDetect(cmd *cobra.Command, args []string) error {
 	opts := detector.Options{
-		DiffBase:   detectDiffBase,
+		DiffBase:   resolveDiffBase(detectDiffBase),
 		MaxCommits: detectCommits,
 	}
 
