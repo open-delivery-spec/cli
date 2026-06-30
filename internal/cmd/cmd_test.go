@@ -484,6 +484,27 @@ func TestRunScore_SARIFCountsAsCritical(t *testing.T) {
 	}
 }
 
+func TestResolveDiffBase(t *testing.T) {
+	t.Run("flag wins over env", func(t *testing.T) {
+		t.Setenv("ODS_DIFF_BASE", "origin/main")
+		if got := resolveDiffBase("HEAD~3"); got != "HEAD~3" {
+			t.Errorf("got %q, want HEAD~3", got)
+		}
+	})
+	t.Run("env used when flag empty", func(t *testing.T) {
+		t.Setenv("ODS_DIFF_BASE", "origin/main")
+		if got := resolveDiffBase(""); got != "origin/main" {
+			t.Errorf("got %q, want origin/main", got)
+		}
+	})
+	t.Run("falls back to HEAD~1", func(t *testing.T) {
+		t.Setenv("ODS_DIFF_BASE", "")
+		if got := resolveDiffBase(""); got != "HEAD~1" {
+			t.Errorf("got %q, want HEAD~1", got)
+		}
+	})
+}
+
 // ─── helpers ─────────────────────────────────────────────────────
 
 func mustWrite(t *testing.T, path, content string) {

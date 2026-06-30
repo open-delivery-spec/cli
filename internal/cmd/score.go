@@ -22,6 +22,7 @@ var (
 	scoreTestDir      string
 	scoreCoverageFile string
 	scoreSARIF        string
+	scoreDiffBase     string
 )
 
 var scoreCmd = &cobra.Command{
@@ -49,11 +50,16 @@ func init() {
 	scoreCmd.Flags().StringVar(&scoreTestDir, "test-dir", "", "test directory (fallback line-count estimation)")
 	scoreCmd.Flags().StringVar(&scoreCoverageFile, "coverage", "", "coverage report file (auto-detected if not set)")
 	scoreCmd.Flags().StringVar(&scoreSARIF, "sarif", "", "SARIF v2.1.0 file whose findings are merged into the score")
+	scoreCmd.Flags().StringVar(&scoreDiffBase, "diff-base", "", "git ref to diff against (default: $ODS_DIFF_BASE or HEAD~1)")
 }
 
 func runScore(cmd *cobra.Command, args []string) error {
+	base := resolveDiffBase(scoreDiffBase)
+	// Keep the duplication estimator (which reads ODS_DIFF_BASE) on the same range.
+	os.Setenv("ODS_DIFF_BASE", base)
+
 	// Run detector
-	detectOpts := detector.Options{DiffBase: "HEAD~1", MaxCommits: 10}
+	detectOpts := detector.Options{DiffBase: base, MaxCommits: 10}
 	detectResult, err := detector.Detect(detectOpts)
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: detection failed: %v\n", err)
@@ -61,7 +67,7 @@ func runScore(cmd *cobra.Command, args []string) error {
 	}
 
 	// Run analyzer on changed files
-	diffFiles, err := getGitDiffFiles("HEAD~1")
+	diffFiles, err := getGitDiffFiles(base)
 	var analyzeResult *analyzer.AnalysisResult
 	if err == nil && len(diffFiles) > 0 {
 		analyzeResult = analyzer.Analyze(analyzer.Options{Files: diffFiles})

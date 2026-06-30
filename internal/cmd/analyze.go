@@ -15,13 +15,28 @@ import (
 )
 
 var (
-	analyzeFile   string
-	analyzeDir    string
-	analyzeAIOnly bool
-	analyzeJSON   bool
-	analyzeFormat string
-	analyzeSARIF  string
+	analyzeFile     string
+	analyzeDir      string
+	analyzeAIOnly   bool
+	analyzeJSON     bool
+	analyzeFormat   string
+	analyzeSARIF    string
+	analyzeDiffBase string
 )
+
+// resolveDiffBase picks the git diff base consistently across commands: an
+// explicit --diff-base flag wins, then the ODS_DIFF_BASE env var (set by
+// validate-action to the PR base), then HEAD~1. This keeps detect/analyze/
+// score/check all looking at the same range.
+func resolveDiffBase(flag string) string {
+	if flag != "" {
+		return flag
+	}
+	if env := os.Getenv("ODS_DIFF_BASE"); env != "" {
+		return env
+	}
+	return "HEAD~1"
+}
 
 var analyzeCmd = &cobra.Command{
 	Use:   "analyze",
@@ -67,6 +82,8 @@ func init() {
 		"output format: summary, detail, json")
 	analyzeCmd.Flags().StringVar(&analyzeSARIF, "sarif", "",
 		"SARIF v2.1.0 file to merge into the analysis result")
+	analyzeCmd.Flags().StringVar(&analyzeDiffBase, "diff-base", "",
+		"git ref to diff against (default: $ODS_DIFF_BASE or HEAD~1)")
 }
 
 func runAnalyze(cmd *cobra.Command, args []string) error {
@@ -86,8 +103,8 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("reading directory %s: %w", analyzeDir, err)
 		}
 	} else {
-		// Default: analyze git diff
-		diffFiles, err := getGitDiffFiles("HEAD~1")
+		// Default: analyze the git diff over the resolved base.
+		diffFiles, err := getGitDiffFiles(resolveDiffBase(analyzeDiffBase))
 		if err == nil && len(diffFiles) > 0 {
 			files = diffFiles
 		} else if analyzeSARIF == "" {
@@ -103,7 +120,7 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	// If --ai-only, filter to files detected as AI-generated
 	if analyzeAIOnly {
 		detectResult, err := detector.Detect(detector.Options{
-			DiffBase:   "HEAD~1",
+			DiffBase:   resolveDiffBase(analyzeDiffBase),
 			MaxCommits: 10,
 		})
 		if err == nil && detectResult.AIGenerated {

@@ -20,6 +20,7 @@ var (
 	checkPolicyFile string
 	checkJSON       bool
 	checkSARIF      string
+	checkDiffBase   string
 )
 
 var checkCmd = &cobra.Command{
@@ -55,16 +56,17 @@ func init() {
 	checkCmd.Flags().BoolVar(&checkJSON, "json", false, "output as JSON")
 	checkCmd.Flags().StringVar(&checkSARIF, "sarif", "",
 		"SARIF v2.1.0 file whose findings are merged into the policy input")
+	checkCmd.Flags().StringVar(&checkDiffBase, "diff-base", "",
+		"git ref to diff against (default: $ODS_DIFF_BASE or HEAD~1)")
 }
 
 func runCheck(cmd *cobra.Command, args []string) error {
 	// Resolve diff base: ODS_DIFF_BASE is set by validate-action to the PR base SHA.
 	// Prefer it over the hardcoded HEAD~1 so the full PR diff is analysed rather than
 	// only the most-recent commit.
-	diffBase := "HEAD~1"
-	if envBase := os.Getenv("ODS_DIFF_BASE"); envBase != "" {
-		diffBase = envBase
-	}
+	diffBase := resolveDiffBase(checkDiffBase)
+	// Keep the duplication estimator (which reads ODS_DIFF_BASE) on the same range.
+	os.Setenv("ODS_DIFF_BASE", diffBase)
 	logx.Debugf("check: diff base = %s", diffBase)
 
 	// Discover policy file
