@@ -52,6 +52,9 @@ type Report struct {
 	AILineShare       float64        `json:"ai_line_share"` // 0..1
 	ByTool            map[string]int `json:"by_tool"`       // tool -> commit count
 	Summary           string         `json:"summary"`
+	// Trends is attached only when a ledger is supplied; it carries the
+	// quality/debt history git attribution alone cannot reconstruct.
+	Trends *Trends `json:"trends,omitempty"`
 }
 
 // Options configures history collection.

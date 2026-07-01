@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 
 	"github.com/open-delivery-spec/cli/internal/logx"
 	"github.com/open-delivery-spec/cli/internal/report"
@@ -13,6 +14,7 @@ var (
 	reportSince   string
 	reportJSON    bool
 	reportMaxCmts int
+	reportLedger  string
 )
 
 var reportCmd = &cobra.Command{
@@ -40,6 +42,8 @@ func init() {
 	reportCmd.Flags().IntVar(&reportMaxCmts, "max-commits", 0,
 		"cap the number of commits scanned (0 = no cap)")
 	reportCmd.Flags().BoolVar(&reportJSON, "json", false, "output as JSON")
+	reportCmd.Flags().StringVar(&reportLedger, "ledger", "",
+		"append-only ledger file (.ods/ledger.jsonl) to add real quality/debt trends")
 }
 
 func runReport(cmd *cobra.Command, args []string) error {
@@ -49,6 +53,17 @@ func runReport(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	logx.Debugf("report: %d commits (%d AI, %d human)", r.TotalCommits, r.AICommits, r.HumanCommits)
+
+	// When a ledger is supplied, enrich the git-attribution report with real
+	// quality/debt trends captured across past runs.
+	if reportLedger != "" {
+		trends, err := report.LoadTrends(reportLedger)
+		if err != nil {
+			return fmt.Errorf("reading ledger: %w", err)
+		}
+		r.Trends = &trends
+		logx.Debugf("report: ledger trends over %d run(s)", trends.Runs)
+	}
 
 	if reportJSON {
 		data, err := json.MarshalIndent(r, "", "  ")
@@ -77,5 +92,30 @@ func runReport(cmd *cobra.Command, args []string) error {
 		}
 	}
 	fmt.Fprintf(out, "\n%s\n", r.Summary)
+
+	if r.Trends != nil {
+		printTrends(out, r.Trends)
+	}
 	return nil
+}
+
+// printTrends renders the ledger-derived quality/debt history beneath the
+// git-attribution summary.
+func printTrends(out io.Writer, t *report.Trends) {
+	fmt.Fprintf(out, "\nQuality trends (ledger) — %d run(s)\n", t.Runs)
+	if t.Runs == 0 {
+		fmt.Fprintln(out, "  No ledger history yet.")
+		return
+	}
+	fmt.Fprintf(out, "  Tech debt:      net %+.1f · avg %+.1f per run\n", t.NetDebtDelta, t.AvgDebtDelta)
+	fmt.Fprintf(out, "  High-risk runs: %d of %d (%.0f%%)\n", t.HighRiskRuns, t.Runs, t.HighRiskRate*100)
+	if t.CoverageRuns > 0 {
+		fmt.Fprintf(out, "  Coverage:       %.0f%% → %.0f%% (%+.0f pts over %d measured run(s))\n",
+			t.FirstCoverage*100, t.LatestCoverage*100, t.CoverageDelta*100, t.CoverageRuns)
+	}
+	if t.AIRuns > 0 && t.HumanRuns > 0 {
+		fmt.Fprintf(out, "  Defect density: AI %.1f vs human %.1f /KLOC\n",
+			t.AIDefectDensity, t.HumanDefectDensity)
+	}
+	fmt.Fprintf(out, "\n%s\n", t.Summary)
 }

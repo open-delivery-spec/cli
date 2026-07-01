@@ -199,6 +199,12 @@ $ ods score --json
 | `--format` | `summary` | Output format: `summary`, `detail`, `json` |
 | `--test-dir` | — | Test directory path (auto-detected) |
 | `--sarif` | — | SARIF file whose findings are merged into the score |
+| `--ledger-append` | — | Append this run's result as one JSON line to an append-only ledger file |
+| `--pr` | `0` | Pull request number recorded in the ledger (0 = omit) |
+
+`--ledger-append` records the run — verdict, tech-debt delta, defect density,
+coverage, duplication, AI attribution — so `ods report --ledger` can later trend
+these signals over time (see below). Writing the ledger never fails the score.
 
 ### `ods check` — Enterprise Policy Enforcement
 
@@ -418,10 +424,34 @@ ODS AI Attribution Report — since 90 days ago
 | `--since` | `90 days ago` | History window (any git `--since` expression) |
 | `--max-commits` | `0` | Cap commits scanned (0 = no cap) |
 | `--json` | `false` | Machine-readable output (commit/line shares, per-tool counts) |
+| `--ledger` | — | Append-only ledger file (`.ods/ledger.jsonl`) to add real quality/debt trends |
 
 This is attribution, not forensic detection: it counts what the tools disclose.
-Coverage/quality history is not reconstructable from git alone, so the report
-focuses on the signals git carries reliably — AI share of commits and churn.
+Coverage and quality history cannot be reconstructed from git alone, so by
+default the report focuses on the signals git carries reliably — AI share of
+commits and churn.
+
+#### Quality trends from a ledger
+
+Those missing quality signals *are* available if runs are recorded. Point
+`ods score --ledger-append .ods/ledger.jsonl` at an append-only ledger on each
+run, then `ods report --ledger .ods/ledger.jsonl` adds a **Quality trends**
+section built from that real history:
+
+```bash
+$ ods report --ledger .ods/ledger.jsonl
+...
+Quality trends (ledger) — 24 run(s)
+  Tech debt:      net +6.5 · avg +0.3 per run
+  High-risk runs: 2 of 24 (8%)
+  Coverage:       61% → 74% (+13 pts over 24 measured run(s))
+  Defect density: AI 1.8 vs human 1.1 /KLOC
+```
+
+The ledger is newline-delimited JSON — one immutable record per run, only ever
+appended — so it is merge-friendly on a dedicated branch and answers the
+governance question git can't: do AI-attributed changes carry more defects than
+human ones? The `--ledger` flag is optional; without it the report is unchanged.
 
 ---
 

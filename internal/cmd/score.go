@@ -10,6 +10,7 @@ import (
 	"github.com/open-delivery-spec/cli/internal/analyzer"
 	"github.com/open-delivery-spec/cli/internal/coverage"
 	"github.com/open-delivery-spec/cli/internal/detector"
+	"github.com/open-delivery-spec/cli/internal/ledger"
 	"github.com/open-delivery-spec/cli/internal/logx"
 	"github.com/open-delivery-spec/cli/internal/sarif"
 	"github.com/open-delivery-spec/cli/internal/scorer"
@@ -23,6 +24,8 @@ var (
 	scoreCoverageFile string
 	scoreSARIF        string
 	scoreDiffBase     string
+	scoreLedgerAppend string
+	scorePRNumber     int
 )
 
 var scoreCmd = &cobra.Command{
@@ -51,6 +54,8 @@ func init() {
 	scoreCmd.Flags().StringVar(&scoreCoverageFile, "coverage", "", "coverage report file (auto-detected if not set)")
 	scoreCmd.Flags().StringVar(&scoreSARIF, "sarif", "", "SARIF v2.1.0 file whose findings are merged into the score")
 	scoreCmd.Flags().StringVar(&scoreDiffBase, "diff-base", "", "git ref to diff against (default: $ODS_DIFF_BASE or HEAD~1)")
+	scoreCmd.Flags().StringVar(&scoreLedgerAppend, "ledger-append", "", "append this run's result as one JSON line to the given append-only ledger file")
+	scoreCmd.Flags().IntVar(&scorePRNumber, "pr", 0, "pull request number recorded in the ledger (0 = omit)")
 }
 
 func runScore(cmd *cobra.Command, args []string) error {
@@ -135,6 +140,17 @@ func runScore(cmd *cobra.Command, args []string) error {
 		scoreResult.Breakdown.CriticalIssues, scoreResult.Breakdown.TestCoverage,
 		scoreResult.Breakdown.DuplicationRate)
 
+	// Persist this run to the append-only ledger so `ods report` can trend the
+	// quality/debt signals git history alone cannot reconstruct. A ledger write
+	// failure is non-fatal: it must never fail the score itself.
+	if scoreLedgerAppend != "" {
+		if err := appendLedger(scoreLedgerAppend, base, detectResult, scoreResult); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: appending to ledger: %v\n", err)
+		} else {
+			logx.Debugf("score: appended run to ledger %s", scoreLedgerAppend)
+		}
+	}
+
 	switch {
 	case scoreJSON || scoreFormat == "json":
 		data, err := json.MarshalIndent(scoreResult, "", "  ")
@@ -194,6 +210,44 @@ func printScoreDetail(cmd *cobra.Command, r *scorer.ScoreResult) {
 	fmt.Fprintf(cmd.OutOrStdout(), "  Critical Issues:    %d\n", b.CriticalIssues)
 	fmt.Fprintf(cmd.OutOrStdout(), "  Test Coverage:      %s\n", coverageStr)
 	fmt.Fprintf(cmd.OutOrStdout(), "  Duplication Rate:   %.0f%%\n", b.DuplicationRate*100)
+}
+
+// appendLedger builds a ledger.Record from a scored run and appends it. The
+// base/head SHAs and branch are read from git so the record is self-describing;
+// missing git context (e.g. shallow or detached state) simply leaves those
+// fields empty rather than failing the append.
+func appendLedger(path, base string, det *detector.DetectionResult, sc *scorer.ScoreResult) error {
+	rec := ledger.Record{
+		PR:      scorePRNumber,
+		BaseSHA: gitRevParse(base),
+		HeadSHA: gitRevParse("HEAD"),
+		Branch:  gitRevParse("--abbrev-ref", "HEAD"),
+
+		Verdict:            sc.Verdict,
+		TechnicalDebtDelta: sc.TechnicalDebtDelta,
+		DefectDensity:      sc.Breakdown.DefectDensity,
+		CriticalIssues:     sc.Breakdown.CriticalIssues,
+		TestCoverage:       sc.Breakdown.TestCoverage,
+		TestCoverageSource: sc.Breakdown.TestCoverageSource,
+		DuplicationRate:    sc.Breakdown.DuplicationRate,
+		AICodeRatio:        sc.Breakdown.AICodeRatio,
+	}
+	if det != nil {
+		rec.AIGenerated = det.AIGenerated
+		rec.AIConfidence = det.Confidence
+	}
+	return ledger.Append(path, rec)
+}
+
+// gitRevParse resolves a git ref to a short SHA (or returns the branch name for
+// --abbrev-ref). Any error yields an empty string so callers can record "no git
+// context" without special-casing.
+func gitRevParse(args ...string) string {
+	out, err := exec.Command("git", append([]string{"rev-parse", "--short"}, args...)...).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func countTestDirLines(dir string) int {
