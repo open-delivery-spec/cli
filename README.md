@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/open-delivery-spec/cli/actions/workflows/ci.yml/badge.svg)](https://github.com/open-delivery-spec/cli/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://go.dev)
-[![GitHub License](https://img.shields.io/github/license/open-delivery-spec/cli?logo=apache)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache_2.0-green?logo=apache)](LICENSE)
 
 ---
 
