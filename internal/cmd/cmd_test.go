@@ -516,3 +516,41 @@ func mustWrite(t *testing.T, path, content string) {
 		t.Fatal(err)
 	}
 }
+
+// TestScaffoldPolicyReviewTier guards the policy that `ods init` writes into
+// user repos: it must stay valid Rego and route review tiers as its comments
+// promise.
+func TestScaffoldPolicyReviewTier(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "scaffold-*.rego")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(defaultPolicy); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	cases := []struct {
+		name string
+		in   *policy.EvalInput
+		want string
+	}{
+		{"clean low-delta change routes auto", &policy.EvalInput{TechnicalDebtDelta: 0.5}, "auto"},
+		{"AI change with high issue routes elevated", &policy.EvalInput{
+			AIGenerated: true,
+			Issues:      []policy.EvalIssue{{Rule: "x", Severity: "high", File: "a.go"}},
+		}, "elevated"},
+		{"mid-delta change routes standard", &policy.EvalInput{TechnicalDebtDelta: 2.0}, "standard"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := policy.Evaluate(f.Name(), tc.in)
+			if err != nil {
+				t.Fatalf("scaffold policy failed to evaluate: %v", err)
+			}
+			if result.ReviewTier != tc.want {
+				t.Errorf("review_tier = %q, want %q", result.ReviewTier, tc.want)
+			}
+		})
+	}
+}

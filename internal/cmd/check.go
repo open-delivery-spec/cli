@@ -287,6 +287,12 @@ func printCheckResult(cmd *cobra.Command, result *policy.EvalResult, policyPath 
 		fmt.Fprintf(cmd.OutOrStdout(), "   Policy: %s\n", policyPath)
 	}
 
+	// Review tier only routes changes that may merge; a blocked PR needs a fix,
+	// not a reviewer assignment.
+	if result.ReviewTier != "" && result.Allowed {
+		fmt.Fprintf(cmd.OutOrStdout(), "   Review tier: %s\n", result.ReviewTier)
+	}
+
 	if len(result.Denials) > 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "   Denials:\n")
 		for _, d := range result.Denials {
