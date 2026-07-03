@@ -53,6 +53,33 @@ warn[msg] {
     count(input.issues) > 2
     msg = "High-confidence AI code with multiple quality issues — enhanced review recommended"
 }
+
+# --- Review routing (optional) ---
+# review_tier tells CI how much human attention this change needs:
+#   "auto"     — low risk: eligible for expedited review or auto-merge
+#   "standard" — normal review (the default)
+#   "elevated" — high risk: request extra reviewers
+# deny always wins — a blocked PR is never routed. Tune the conditions to your
+# team; e.g. add "input.test_coverage >= 0.6" to auto if you publish coverage.
+default review_tier := "standard"
+
+review_tier := "auto" {
+    input.technical_debt_delta <= 1.0
+    not has_high_or_critical
+}
+
+review_tier := "elevated" {
+    input.ai_generated == true
+    has_high_or_critical
+}
+
+has_high_or_critical {
+    input.issues[_].severity == "critical"
+}
+
+has_high_or_critical {
+    input.issues[_].severity == "high"
+}
 `
 
 var initCmd = &cobra.Command{

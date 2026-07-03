@@ -209,6 +209,36 @@ $ ods check --json
 | `--json` | `false` | JSON output |
 | `--sarif` | — | SARIF file whose findings are merged into the policy input |
 
+#### Review routing: `review_tier`
+
+Beyond allow/deny, a policy can answer a second question: **how much human
+attention does this change need?** Define a `review_tier` rule returning one of
+`auto` (low risk — eligible for expedited review or auto-merge), `standard`
+(normal review, the default), or `elevated` (high risk — request extra
+reviewers):
+
+```rego
+default review_tier := "standard"
+
+review_tier := "auto" {
+    input.technical_debt_delta <= 1.0
+    not has_high_or_critical
+}
+
+review_tier := "elevated" {
+    input.ai_generated == true
+    has_high_or_critical
+}
+```
+
+The tier is reported in the text output and as `"review_tier"` in `--json`.
+Semantics: **deny always wins** — a blocked PR is never routed; the tier is an
+advisory routing signal for changes that may merge, and it never affects the
+exit code. Policies that define no `review_tier` behave exactly as before
+(consumers should treat the absent tier as `standard`). An unknown tier value
+falls back to `standard` with a warning instead of failing the gate.
+`ods init` scaffolds these rules (with explanatory comments) into new policies.
+
 ### `ods hook install` — Git Hooks
 
 ```bash

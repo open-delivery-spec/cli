@@ -12,11 +12,29 @@ import (
 	"github.com/open-policy-agent/opa/rego"
 )
 
+// Review tiers route scarce human review attention by risk. They are advisory
+// routing signals for *allowed* changes — deny always wins, so a blocked PR is
+// never routed. Policies opt in by defining a `review_tier` rule; when absent,
+// consumers should treat the tier as ReviewTierStandard.
+const (
+	// ReviewTierAuto marks a low-risk change eligible for expedited review or
+	// auto-merge (per the consumer's configuration).
+	ReviewTierAuto = "auto"
+	// ReviewTierStandard is the default: normal review.
+	ReviewTierStandard = "standard"
+	// ReviewTierElevated marks a high-risk change that should get extra
+	// reviewers or senior attention.
+	ReviewTierElevated = "elevated"
+)
+
 // EvalResult is the output of a policy evaluation.
 type EvalResult struct {
 	Allowed  bool     `json:"allowed"`
 	Denials  []string `json:"denials,omitempty"`
 	Warnings []string `json:"warnings,omitempty"`
+	// ReviewTier is the policy's review-routing verdict (auto/standard/
+	// elevated). Empty when the policy defines no review_tier rule.
+	ReviewTier string `json:"review_tier,omitempty"`
 }
 
 // EvalInput is the data passed to Rego policies.
@@ -142,6 +160,23 @@ func parseRegoResults(results rego.ResultSet) (*EvalResult, error) {
 	if allowRaw, ok := policyMap["allow"]; ok {
 		if allowBool, ok := allowRaw.(bool); ok {
 			out.Allowed = allowBool
+		}
+	}
+
+	// Extract review_tier. An unknown value falls back to "standard" with a
+	// warning rather than failing the pipeline — a routing typo in a policy
+	// must not break the gate itself.
+	if tierRaw, ok := policyMap["review_tier"]; ok {
+		if tier, ok := tierRaw.(string); ok {
+			switch tier {
+			case ReviewTierAuto, ReviewTierStandard, ReviewTierElevated:
+				out.ReviewTier = tier
+			default:
+				out.ReviewTier = ReviewTierStandard
+				out.Warnings = append(out.Warnings, fmt.Sprintf(
+					"policy returned unknown review_tier %q — falling back to %q",
+					tier, ReviewTierStandard))
+			}
 		}
 	}
 

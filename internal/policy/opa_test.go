@@ -220,3 +220,114 @@ func TestDefaultRegoPolicy(t *testing.T) {
 		t.Error("default policy missing deny rules")
 	}
 }
+
+// writeTempPolicy writes a policy string to a temp file and returns its path.
+func writeTempPolicy(t *testing.T, content string) string {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "ods-tier-*.rego")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(content); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	return f.Name()
+}
+
+const tierPolicy = `package ods.policy
+
+default allow := true
+default review_tier := "standard"
+
+review_tier := "auto" {
+    input.technical_debt_delta <= 1.0
+    not has_high_or_critical
+}
+
+review_tier := "elevated" {
+    input.ai_generated == true
+    has_high_or_critical
+}
+
+has_high_or_critical {
+    input.issues[_].severity == "critical"
+}
+
+has_high_or_critical {
+    input.issues[_].severity == "high"
+}
+`
+
+func TestReviewTierRouting(t *testing.T) {
+	path := writeTempPolicy(t, tierPolicy)
+
+	t.Run("low risk routes to auto", func(t *testing.T) {
+		result, err := Evaluate(path, &EvalInput{TechnicalDebtDelta: 0.5})
+		if err != nil {
+			t.Fatalf("evaluate failed: %v", err)
+		}
+		if result.ReviewTier != ReviewTierAuto {
+			t.Errorf("review_tier = %q, want %q", result.ReviewTier, ReviewTierAuto)
+		}
+	})
+
+	t.Run("AI change with high issue routes to elevated", func(t *testing.T) {
+		result, err := Evaluate(path, &EvalInput{
+			AIGenerated:        true,
+			TechnicalDebtDelta: 2.0,
+			Issues:             []EvalIssue{{Rule: "x", Severity: "high"}},
+		})
+		if err != nil {
+			t.Fatalf("evaluate failed: %v", err)
+		}
+		if result.ReviewTier != ReviewTierElevated {
+			t.Errorf("review_tier = %q, want %q", result.ReviewTier, ReviewTierElevated)
+		}
+	})
+
+	t.Run("everything else routes to standard", func(t *testing.T) {
+		result, err := Evaluate(path, &EvalInput{TechnicalDebtDelta: 2.5})
+		if err != nil {
+			t.Fatalf("evaluate failed: %v", err)
+		}
+		if result.ReviewTier != ReviewTierStandard {
+			t.Errorf("review_tier = %q, want %q", result.ReviewTier, ReviewTierStandard)
+		}
+	})
+}
+
+func TestReviewTierUnknownValueFallsBack(t *testing.T) {
+	path := writeTempPolicy(t, `package ods.policy
+
+default allow := true
+review_tier := "yolo"
+`)
+	result, err := Evaluate(path, &EvalInput{})
+	if err != nil {
+		t.Fatalf("evaluate failed: %v", err)
+	}
+	if result.ReviewTier != ReviewTierStandard {
+		t.Errorf("review_tier = %q, want fallback %q", result.ReviewTier, ReviewTierStandard)
+	}
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "unknown review_tier") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected an unknown-review_tier warning, got %v", result.Warnings)
+	}
+}
+
+func TestReviewTierAbsentStaysEmpty(t *testing.T) {
+	path := writeTempPolicy(t, DefaultRegoPolicy())
+	result, err := Evaluate(path, &EvalInput{})
+	if err != nil {
+		t.Fatalf("evaluate failed: %v", err)
+	}
+	if result.ReviewTier != "" {
+		t.Errorf("review_tier = %q, want empty (rule not defined)", result.ReviewTier)
+	}
+}
