@@ -309,15 +309,6 @@ func TestNonEmptyLines(t *testing.T) {
 	}
 }
 
-func TestSplitCommits(t *testing.T) {
-	raw := "feat(auth): add OAuth\n\nAI-assisted: true\n\nfix(ui): button\n\nrefactor(core): clean up"
-	commits := splitCommits(raw)
-	// Should find at least one commit
-	if len(commits) == 0 {
-		t.Fatal("splitCommits returned no commits")
-	}
-}
-
 func TestAITrailerTool(t *testing.T) {
 	cases := []struct {
 		name, msg, want string

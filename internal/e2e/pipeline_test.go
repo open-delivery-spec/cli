@@ -311,3 +311,73 @@ func hasRule(issues []struct {
 	}
 	return false
 }
+
+// TestPipeline_CommitScanScopedToDiffBase guards against attribution leakage:
+// AI trailers on commits *behind* the diff base belong to already-merged
+// history and must not flag the change under review. It also checks that
+// evidence rows carry the commit hash so multiple attributed commits render
+// as distinguishable, auditable lines.
+func TestPipeline_CommitScanScopedToDiffBase(t *testing.T) {
+	dir := initRepo(t)
+
+	// History: an already-merged AI-attributed commit…
+	writeFile(t, dir, "old.go", "package old\n\nfunc Old() int { return 1 }\n")
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-m", "feat: old AI work\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
+
+	// …followed by the change under review: purely human.
+	writeFile(t, dir, "new.go", "package new\n\nfunc New() int { return 2 }\n")
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-m", "feat: human follow-up")
+
+	t.Run("human change is not flagged by AI history behind the base", func(t *testing.T) {
+		out, exit := runODS(t, dir, "detect", "--diff-base", "HEAD~1", "--branch", "main", "--json")
+		if exit != 0 {
+			t.Errorf("exit = %d, want 0 for human change", exit)
+		}
+		var res struct {
+			AIGenerated bool     `json:"ai_generated"`
+			Sources     []string `json:"sources"`
+		}
+		mustJSON(t, out, &res)
+		if res.AIGenerated {
+			t.Errorf("ai_generated = true — AI commit behind the diff base leaked into the scan")
+		}
+		if contains(res.Sources, "commit-trailer") {
+			t.Errorf("sources = %v — no commit-trailer evidence expected within HEAD~1..HEAD", res.Sources)
+		}
+	})
+
+	t.Run("widening the base includes the AI commit with its hash", func(t *testing.T) {
+		out, _ := runODS(t, dir, "detect", "--diff-base", "HEAD~2", "--branch", "main", "--json")
+		var res struct {
+			AIGenerated bool `json:"ai_generated"`
+			Evidence    []struct {
+				Source string `json:"source"`
+				Value  string `json:"value"`
+			} `json:"evidence"`
+		}
+		mustJSON(t, out, &res)
+		if !res.AIGenerated {
+			t.Fatalf("ai_generated = false, want true when the AI commit is in range")
+		}
+		found := false
+		for _, ev := range res.Evidence {
+			if ev.Source != "commit-trailer" {
+				continue
+			}
+			found = true
+			// Value shape: "AI-assisted commit <shorthash> (tool: Claude)"
+			if !strings.Contains(ev.Value, "(tool: Claude)") || !strings.Contains(ev.Value, "AI-assisted commit ") {
+				t.Errorf("evidence value = %q, want tool name and commit hash", ev.Value)
+			}
+			fields := strings.Fields(ev.Value)
+			if len(fields) < 3 || len(fields[2]) < 7 {
+				t.Errorf("evidence value = %q — expected a short hash as the third field", ev.Value)
+			}
+		}
+		if !found {
+			t.Error("no commit-trailer evidence found with the widened base")
+		}
+	})
+}

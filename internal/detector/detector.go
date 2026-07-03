@@ -228,36 +228,61 @@ func extractCoAuthorTool(line string) string {
 	return name
 }
 
-// detectFromCommits checks recent git commits for AI-related trailers.
+// commitRecord is one scanned commit: its short hash (empty when the message
+// came from a file rather than git history) and full message.
+type commitRecord struct {
+	hash    string
+	message string
+}
+
+// detectFromCommits checks the commits under review for AI-related trailers.
+//
+// The scan is scoped to DiffBase..HEAD: only commits that are part of the
+// change under review are attribution evidence for it. An unbounded
+// `git log -N` walks past the base into the target branch's history, where
+// previously merged AI-attributed commits would be misattributed to the
+// current change — on a repo whose main history contains AI commits, a purely
+// human PR would flag as AI-generated. MaxCommits stays as a cap; when the
+// base ref does not resolve (shallow clone, initial commit) the scan falls
+// back to the unscoped window rather than reporting nothing.
 func detectFromCommits(opts Options) []Evidence {
 	var evidence []Evidence
 
-	log, err := gitOutput("log", fmt.Sprintf("-%d", opts.MaxCommits),
-		"--format=%B", "--no-merges")
-	if err != nil || log == "" {
-		// Try reading commit message from file
-		if opts.CommitMessageFile != "" {
-			data, err := os.ReadFile(opts.CommitMessageFile)
-			if err == nil {
-				log = string(data)
-			}
+	// %x1e/%x1f: record/field separators that cannot appear in git hashes and
+	// are vanishingly unlikely in commit messages — no splitting heuristics.
+	args := []string{"log", fmt.Sprintf("-%d", opts.MaxCommits),
+		"--format=%x1e%h%x1f%B", "--no-merges"}
+	if opts.DiffBase != "" {
+		if _, err := gitOutput("rev-parse", "--verify", opts.DiffBase); err == nil {
+			args = append(args, opts.DiffBase+"..HEAD")
 		}
 	}
 
-	if log == "" {
-		return nil
+	var records []commitRecord
+	log, err := gitOutput(args...)
+	if err == nil && log != "" {
+		for _, rec := range strings.Split(log, "\x1e") {
+			if strings.TrimSpace(rec) == "" {
+				continue
+			}
+			parts := strings.SplitN(rec, "\x1f", 2)
+			if len(parts) < 2 {
+				continue
+			}
+			records = append(records, commitRecord{
+				hash:    strings.TrimSpace(parts[0]),
+				message: parts[1],
+			})
+		}
+	} else if opts.CommitMessageFile != "" {
+		// Fall back to a message file (e.g. commit-msg hook) — no hash known.
+		if data, err := os.ReadFile(opts.CommitMessageFile); err == nil {
+			records = append(records, commitRecord{message: string(data)})
+		}
 	}
 
-	// Parse each commit for AI-related footers
-	// AI-assisted: true | AI-tool: <name> | Co-Authored-By: Claude <...>
-	commits := strings.Split(log, "\n\n---\n\n")
-	if len(commits) == 1 {
-		// git log doesn't add separators; split on commit delimiters
-		commits = splitCommits(log)
-	}
-
-	for i, commit := range commits {
-		commit = strings.TrimSpace(commit)
+	for _, rec := range records {
+		commit := strings.TrimSpace(rec.message)
 		if commit == "" {
 			continue
 		}
@@ -286,9 +311,14 @@ func detectFromCommits(opts Options) []Evidence {
 		}
 
 		if hasAI {
-			value := "AI-assisted commit detected"
+			// Include the short hash so each evidence row is auditable and
+			// N attributed commits don't render as N identical lines.
+			value := "AI-assisted commit"
+			if rec.hash != "" {
+				value += " " + rec.hash
+			}
 			if aiTool != "" {
-				value = fmt.Sprintf("AI-assisted commit (tool: %s)", aiTool)
+				value += fmt.Sprintf(" (tool: %s)", aiTool)
 			}
 			if aiScope != "" {
 				value += fmt.Sprintf(" [scope: %s]", aiScope)
@@ -299,44 +329,10 @@ func detectFromCommits(opts Options) []Evidence {
 				Value:      value,
 				Confidence: 0.9,
 			})
-			_ = i // commit index for future use
 		}
 	}
 
 	return evidence
-}
-
-// splitCommits splits a raw git log output into individual commit messages.
-func splitCommits(raw string) []string {
-	// git log --format=%B produces commits separated by the record separator
-	// But without --no-merges separator, commits run together.
-	// Use a heuristic: look for "commit <hash>" lines or conventional commit starts
-	var commits []string
-	scanner := bufio.NewScanner(strings.NewReader(raw))
-	var buf strings.Builder
-	for scanner.Scan() {
-		line := scanner.Text()
-		// Detect start of a new commit by conventional commit pattern at beginning of line
-		if buf.Len() > 0 && isConventionalCommitStart(line) {
-			commits = append(commits, buf.String())
-			buf.Reset()
-		}
-		buf.WriteString(line)
-		buf.WriteString("\n")
-	}
-	if buf.Len() > 0 {
-		commits = append(commits, buf.String())
-	}
-	if len(commits) <= 1 {
-		return []string{raw}
-	}
-	return commits
-}
-
-var convCommitPattern = regexp.MustCompile(`^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?!?: `)
-
-func isConventionalCommitStart(line string) bool {
-	return convCommitPattern.MatchString(line)
 }
 
 // knownAIToolBranchNames contains the first path segment used by AI coding tools
