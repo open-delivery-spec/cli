@@ -1,6 +1,7 @@
 package scorer
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -277,4 +278,34 @@ func TestDuplicationRate(t *testing.T) {
 			t.Errorf("duplicationRate(nil) = %f, want 0", r)
 		}
 	})
+}
+
+// TestScore_DeltaIndependentOfDiffSize locks the fix for the density
+// explosion: one high finding must cost the same debt in a tiny diff as in a
+// large one. Density is a per-KLOC ratio — charging it into the delta made
+// the same finding score 100x higher on a 20-line change than on a 2000-line
+// change, blocking small PRs hardest (the opposite of the real risk) and
+// double-charging findings already counted absolutely.
+func TestScore_DeltaIndependentOfDiffSize(t *testing.T) {
+	t.Setenv("ODS_DIFF_BASE", "HEAD") // zero duplication, deterministic
+	mk := func(lines int) *ScoreResult {
+		return Score(Options{
+			AnalyzerResult: &analyzer.AnalysisResult{
+				TotalLines: lines,
+				Issues:     []analyzer.Issue{{Rule: "t", Severity: "high", Line: 1}},
+			},
+			TestLines:         lines, // coverage 1.0 → no coverage-gap term
+			TotalChangedLines: lines,
+		})
+	}
+	small, large := mk(20), mk(2000)
+	if math.Abs(small.TechnicalDebtDelta-large.TechnicalDebtDelta) > 1e-9 {
+		t.Errorf("delta depends on diff size: 20 lines → %f, 2000 lines → %f",
+			small.TechnicalDebtDelta, large.TechnicalDebtDelta)
+	}
+	// The ratio itself stays visible in the breakdown for humans.
+	if small.Breakdown.DefectDensity <= large.Breakdown.DefectDensity {
+		t.Errorf("density should still reflect the per-KLOC ratio: small=%f large=%f",
+			small.Breakdown.DefectDensity, large.Breakdown.DefectDensity)
+	}
 }

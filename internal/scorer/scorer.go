@@ -26,7 +26,7 @@ type ScoreResult struct {
 // ScoreBreakdown provides the dimensional scores.
 type ScoreBreakdown struct {
 	AICodeRatio        float64 `json:"ai_code_ratio"`        // AI lines / total lines
-	DefectDensity      float64 `json:"defect_density"`       // high/critical issues per KLOC
+	DefectDensity      float64 `json:"defect_density"`       // high/critical issues per KLOC (informational — not part of the delta)
 	CriticalIssues     int     `json:"critical_issues"`      // critical + high severity
 	TestCoverage       float64 `json:"test_coverage"`        // fraction in [0,1] or -1 if not measured
 	TestCoverageSource string  `json:"test_coverage_source"` // go/lcov/cobertura/nyc/estimated/unknown
@@ -116,16 +116,22 @@ func Score(opts Options) *ScoreResult {
 	result.Breakdown = br
 
 	// Technical debt is driven by code *quality*, not by how much of the change
-	// is AI-written. Quality signals (defects, critical issues, coverage gap,
+	// is AI-written. Quality signals (critical/high findings, coverage gap,
 	// duplication) form the base debt. The AI ratio then acts as a bounded risk
 	// multiplier — AI-authored defects and untested AI code carry more risk
 	// because no human reasoned through them — but AI quantity alone never
 	// creates debt. A clean, fully-AI change scores ~0.
 	//
+	// Defect density is deliberately NOT part of the delta. It is a per-KLOC
+	// ratio whose denominator is the diff size, so one high finding in a
+	// 20-line change would cost 100x the same finding in a 2000-line change —
+	// punishing small PRs hardest, the exact opposite of the real risk. The
+	// absolute critical/high count below already charges for every finding at
+	// any diff size; density stays in the breakdown as an informational rate.
+	//
 	// The coverage-gap term is skipped when coverage was not measured (-1
 	// sentinel) to avoid false-positive blocks where no coverage tool is set up.
 	qualityDebt := 0.0
-	qualityDebt += br.DefectDensity * 2.0           // high/critical defects per KLOC
 	qualityDebt += float64(br.CriticalIssues) * 1.5 // critical + high issues
 	if br.TestCoverage >= 0 {
 		qualityDebt += (1.0 - br.TestCoverage) * 1.0 // coverage gap, up to 1.0
