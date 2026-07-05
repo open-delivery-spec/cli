@@ -328,3 +328,40 @@ func TestAITrailerTool(t *testing.T) {
 		})
 	}
 }
+
+// ── Assisted-by (Linux kernel coding-assistants convention) ──────────────────
+
+func TestParseAssistedBy(t *testing.T) {
+	cases := []struct {
+		line         string
+		agent, model string
+		ok           bool
+	}{
+		{"Assisted-by: Claude:claude-3-opus", "Claude", "claude-3-opus", true},
+		{"Assisted-by: Claude:claude-3-opus coccinelle sparse", "Claude", "claude-3-opus", true},
+		{"Assisted-by: Claude", "Claude", "", true}, // bare agent, no model
+		{"assisted-by: copilot:gpt-4o", "copilot", "gpt-4o", true},
+		{"  Assisted-by: Gemini:gemini-pro clang-tidy", "Gemini", "gemini-pro", true},
+		{"Assisted-by:", "", "", false},
+		{"Co-Authored-By: Claude <noreply@anthropic.com>", "", "", false},
+		{"Not-Assisted-by: Claude", "", "", false},
+	}
+	for _, tc := range cases {
+		agent, model, ok := parseAssistedBy(tc.line)
+		if agent != tc.agent || model != tc.model || ok != tc.ok {
+			t.Errorf("parseAssistedBy(%q) = (%q, %q, %v), want (%q, %q, %v)",
+				tc.line, agent, model, ok, tc.agent, tc.model, tc.ok)
+		}
+	}
+}
+
+func TestAITrailerToolAssistedBy(t *testing.T) {
+	msg := "drm: fix null deref in vblank handling\n\nAssisted-by: Claude:claude-3-opus coccinelle\nSigned-off-by: Dev <dev@example.com>"
+	if got := AITrailerTool(msg); got != "Claude" {
+		t.Errorf("AITrailerTool = %q, want %q (aggregate by agent name)", got, "Claude")
+	}
+	human := "drm: fix null deref\n\nSigned-off-by: Dev <dev@example.com>"
+	if got := AITrailerTool(human); got != "" {
+		t.Errorf("AITrailerTool = %q, want empty for human commit", got)
+	}
+}
