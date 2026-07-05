@@ -3,7 +3,7 @@ module github.com/open-delivery-spec/cli
 go 1.25.0
 
 require (
-	github.com/open-policy-agent/opa v1.18.0
+	github.com/open-policy-agent/opa v1.18.2
 	github.com/spf13/cobra v1.10.2
 )
 
