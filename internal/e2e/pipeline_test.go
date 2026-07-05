@@ -381,3 +381,44 @@ func TestPipeline_CommitScanScopedToDiffBase(t *testing.T) {
 		}
 	})
 }
+
+// TestPipeline_KernelAssistedByTrailer verifies the Linux kernel's
+// coding-assistants attribution convention end to end: a commit carrying
+// "Assisted-by: AGENT:MODEL [tools...]" is attributed, with the agent and
+// model surfaced in the evidence.
+func TestPipeline_KernelAssistedByTrailer(t *testing.T) {
+	dir := initRepo(t)
+	writeFile(t, dir, "vblank.go", "package drm\n\nfunc FixVblank() int { return 1 }\n")
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-m",
+		"fix: null deref in vblank handling\n\nAssisted-by: Claude:claude-3-opus coccinelle sparse")
+
+	out, _ := runODS(t, dir, "detect", "--branch", "main", "--json")
+	var res struct {
+		AIGenerated bool     `json:"ai_generated"`
+		Sources     []string `json:"sources"`
+		Evidence    []struct {
+			Source string `json:"source"`
+			Value  string `json:"value"`
+		} `json:"evidence"`
+	}
+	mustJSON(t, out, &res)
+	if !res.AIGenerated {
+		t.Fatalf("ai_generated = false, want true for Assisted-by trailer")
+	}
+	if !contains(res.Sources, "commit-trailer") {
+		t.Errorf("sources = %v, want to include commit-trailer", res.Sources)
+	}
+	found := false
+	for _, ev := range res.Evidence {
+		if ev.Source == "commit-trailer" {
+			found = true
+			if !strings.Contains(ev.Value, "tool: Claude") || !strings.Contains(ev.Value, "model: claude-3-opus") {
+				t.Errorf("evidence value = %q, want agent and model surfaced", ev.Value)
+			}
+		}
+	}
+	if !found {
+		t.Error("no commit-trailer evidence for Assisted-by commit")
+	}
+}

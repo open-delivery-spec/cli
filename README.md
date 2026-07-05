@@ -64,9 +64,17 @@ ods check
 
 ### `ods detect` — AI Code Attribution
 
-Attributes AI-generated code using `Co-Authored-By` trailers, commit `AI-assisted:` footers, branch names, PR disclosure, and diff heuristics.
+Attributes AI-generated code using `Co-Authored-By` trailers, the Linux kernel's `Assisted-by:` trailers, commit `AI-assisted:` footers, branch names, PR disclosure, and diff heuristics.
 
-`Co-Authored-By` trailers emitted by Claude Code, GitHub Copilot, and Cursor are the **primary** signal — no additional configuration needed. This is attribution from signals the tools volunteer, not forensic detection: stripping the trailer evades it, and the diff heuristics are only a low-confidence fallback.
+`Co-Authored-By` trailers emitted by Claude Code, GitHub Copilot, and Cursor are the **primary** signal — no additional configuration needed. The [Linux kernel coding-assistants convention](https://docs.kernel.org/process/coding-assistants.html) is recognized as a first-class disclosure with the same confidence:
+
+```text
+Assisted-by: Claude:claude-3-opus coccinelle sparse
+```
+
+parses the agent (`Claude`) and model version (`claude-3-opus`) into the evidence; the trailing analysis-tool list is not attribution and is ignored. A bare `Assisted-by: Claude` without the model also counts.
+
+This is attribution from signals the tools (or authors) volunteer, not forensic detection: stripping the trailer evades it, and the diff heuristics are only a low-confidence fallback.
 
 ```bash
 $ ods detect --diff-base origin/main --branch feature/ai-oauth
@@ -285,7 +293,9 @@ every rule the analyzer can emit.
 
 A governance view over recent history: how much delivered work is AI-assisted,
 and trending which way. Attribution comes from the `Co-Authored-By` trailers AI
-tools emit automatically — the same signal as `ods detect`.
+tools emit automatically and the kernel-style `Assisted-by:` trailers — the
+same signals as `ods detect`. `Assisted-by` commits aggregate under their agent
+name in the per-tool breakdown.
 
 ```bash
 $ ods report --since "90 days ago"

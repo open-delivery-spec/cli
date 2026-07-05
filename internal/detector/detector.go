@@ -201,6 +201,11 @@ func AITrailerTool(message string) string {
 			}
 			return "AI"
 		}
+		// Linux kernel convention (Assisted-by: AGENT:MODEL [tools...]).
+		// Aggregate by agent name; the model version stays in evidence detail.
+		if agent, _, ok := parseAssistedBy(line); ok {
+			return agent
+		}
 		lower := strings.ToLower(line)
 		if strings.HasPrefix(lower, "ai-tool:") {
 			if tool := strings.TrimSpace(line[len("ai-tool:"):]); tool != "" {
@@ -213,6 +218,28 @@ func AITrailerTool(message string) string {
 		}
 	}
 	return ""
+}
+
+// parseAssistedBy parses the Linux kernel's coding-assistant attribution
+// trailer (Documentation/process/coding-assistants.rst):
+//
+//	Assisted-by: AGENT_NAME:MODEL_VERSION [TOOL1] [TOOL2]
+//
+// It returns the agent name and model version ("" when the writer omitted
+// the :MODEL part, which happens in practice). The optional trailing
+// analysis-tool list (coccinelle, sparse, ...) is not attribution and is
+// ignored here.
+func parseAssistedBy(line string) (agent, model string, ok bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(strings.ToLower(trimmed), "assisted-by:") {
+		return "", "", false
+	}
+	rest := strings.TrimSpace(trimmed[len("assisted-by:"):])
+	if rest == "" {
+		return "", "", false
+	}
+	agent, model, _ = strings.Cut(strings.Fields(rest)[0], ":")
+	return agent, model, agent != ""
 }
 
 // extractCoAuthorTool extracts the display name from a Co-Authored-By trailer.
@@ -289,7 +316,7 @@ func detectFromCommits(opts Options) []Evidence {
 		lines := strings.Split(commit, "\n")
 
 		hasAI := false
-		var aiTool, aiScope string
+		var aiTool, aiModel, aiScope string
 
 		for _, line := range lines {
 			line = strings.TrimSpace(line)
@@ -299,6 +326,16 @@ func detectFromCommits(opts Options) []Evidence {
 				hasAI = true
 				if tool := extractCoAuthorTool(line); tool != "" && aiTool == "" {
 					aiTool = tool
+				}
+			}
+			// Linux kernel convention: Assisted-by: AGENT:MODEL [tools...]
+			if agent, model, ok := parseAssistedBy(line); ok {
+				hasAI = true
+				if aiTool == "" {
+					aiTool = agent
+				}
+				if aiModel == "" {
+					aiModel = model
 				}
 			}
 			if strings.HasPrefix(strings.ToLower(line), "ai-tool:") {
@@ -318,7 +355,11 @@ func detectFromCommits(opts Options) []Evidence {
 				value += " " + rec.hash
 			}
 			if aiTool != "" {
-				value += fmt.Sprintf(" (tool: %s)", aiTool)
+				value += fmt.Sprintf(" (tool: %s", aiTool)
+				if aiModel != "" {
+					value += fmt.Sprintf(", model: %s", aiModel)
+				}
+				value += ")"
 			}
 			if aiScope != "" {
 				value += fmt.Sprintf(" [scope: %s]", aiScope)
