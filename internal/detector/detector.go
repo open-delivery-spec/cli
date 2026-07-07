@@ -9,7 +9,11 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
+
+	"github.com/open-delivery-spec/cli/internal/gitai"
 )
 
 // DetectionResult is the output of AI code detection for a given ref range.
@@ -73,6 +77,28 @@ func Detect(opts Options) (*DetectionResult, error) {
 		result.Sources = append(result.Sources, "commit-trailer")
 	}
 
+	// Source 1.5: git-ai authorship notes (refs/notes/ai) — line-level
+	// attribution recorded by the git-ai extension. When present this is the
+	// highest-fidelity signal available: measured AI lines per file rather
+	// than a confidence-based estimate.
+	gitaiAttr, _ := gitai.ReadRange(opts.DiffBase, opts.MaxCommits)
+	if gitaiAttr != nil {
+		for _, c := range gitaiAttr.Commits {
+			value := fmt.Sprintf("AI-assisted commit %s (git-ai: %d AI line(s)", c.Hash, c.AILines)
+			if len(c.Agents) > 0 {
+				value += ", " + strings.Join(c.Agents, ", ")
+			}
+			value += ")"
+			result.Evidence = append(result.Evidence, Evidence{
+				Source:     "git-ai-notes",
+				Signal:     "authorship-log",
+				Value:      value,
+				Confidence: 0.95,
+			})
+		}
+		result.Sources = append(result.Sources, "git-ai-notes")
+	}
+
 	// Source 2: Branch name prefix (ai-, claude/, copilot/, etc.)
 	if opts.BranchName != "" {
 		if ev := detectFromBranch(opts.BranchName); ev != nil {
@@ -89,12 +115,18 @@ func Detect(opts Options) (*DetectionResult, error) {
 		}
 	}
 
-	// Source 4: Diff heuristics (statistical fingerprinting)
-	fileDetections, diffEvidence := detectFromDiff(opts.DiffBase)
-	result.Files = fileDetections
-	result.Evidence = append(result.Evidence, diffEvidence...)
-	if len(fileDetections) > 0 {
-		result.Sources = append(result.Sources, "diff-heuristics")
+	// Source 4: per-file AI line counts. git-ai's measured authorship wins
+	// over the statistical diff heuristics — never mix a measurement with a
+	// guess for the same quantity.
+	if gitaiAttr != nil && len(gitaiAttr.Files) > 0 {
+		result.Files = filesFromGitAI(gitaiAttr, opts.DiffBase)
+	} else {
+		fileDetections, diffEvidence := detectFromDiff(opts.DiffBase)
+		result.Files = fileDetections
+		result.Evidence = append(result.Evidence, diffEvidence...)
+		if len(fileDetections) > 0 {
+			result.Sources = append(result.Sources, "diff-heuristics")
+		}
 	}
 
 	// Aggregate: compute overall AI detection and confidence
@@ -260,6 +292,51 @@ func extractCoAuthorTool(line string) string {
 type commitRecord struct {
 	hash    string
 	message string
+}
+
+// filesFromGitAI converts git-ai's measured per-file AI line counts into
+// FileDetections. TotalLines comes from the diff's insertions per file (same
+// range as the rest of detection); AI lines are capped at the insertions so
+// authorship recorded on lines outside this change cannot inflate the ratio.
+// Files absent from the diff are skipped for the same reason.
+func filesFromGitAI(attr *gitai.RangeAttribution, base string) []FileDetection {
+	insertions := map[string]int{}
+	if out, err := gitOutput("diff", "--numstat", base); err == nil {
+		for _, line := range strings.Split(out, "\n") {
+			fields := strings.Fields(line)
+			if len(fields) < 3 {
+				continue
+			}
+			if n, err := strconv.Atoi(fields[0]); err == nil { // "-" for binary
+				insertions[fields[2]] = n
+			}
+		}
+	}
+
+	paths := make([]string, 0, len(attr.Files))
+	for p := range attr.Files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	var files []FileDetection
+	for _, path := range paths {
+		total, changed := insertions[path]
+		if !changed || total == 0 {
+			continue
+		}
+		ai := attr.Files[path]
+		if ai > total {
+			ai = total
+		}
+		files = append(files, FileDetection{
+			Path:       path,
+			AILines:    ai,
+			TotalLines: total,
+			Confidence: 0.95,
+		})
+	}
+	return files
 }
 
 // detectFromCommits checks the commits under review for AI-related trailers.

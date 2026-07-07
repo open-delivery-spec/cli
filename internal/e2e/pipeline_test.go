@@ -422,3 +422,101 @@ func TestPipeline_KernelAssistedByTrailer(t *testing.T) {
 		t.Error("no commit-trailer evidence for Assisted-by commit")
 	}
 }
+
+// TestPipeline_GitAINotes verifies the git-ai integration end to end: a
+// commit carrying a Git AI Standard v3 authorship log under refs/notes/ai is
+// attributed with *measured* per-file AI lines, which replace the diff
+// heuristics' estimates.
+func TestPipeline_GitAINotes(t *testing.T) {
+	dir := initRepo(t)
+	// A 10-line code file; the note attributes 6 of its lines to an AI session.
+	writeFile(t, dir, "svc/handler.go", `package svc
+
+func A() int { return 1 }
+func B() int { return 2 }
+func C() int { return 3 }
+func D() int { return 4 }
+func E() int { return 5 }
+func F() int { return 6 }
+`)
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-m", "feat: add handler") // no AI trailer on purpose
+
+	note := `svc/handler.go
+  s_c9883b05a2487d::t_9f8e7d6c5b4a32 3-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "base_commit_sha": "0000000000000000000000000000000000000000",
+  "prompts": {},
+  "sessions": {
+    "s_c9883b05a2487d": {
+      "agent_id": {"tool": "cursor", "id": "abc", "model": "claude-sonnet-4-5"}
+    }
+  }
+}`
+	git(t, dir, "notes", "--ref=ai", "add", "-m", note, "HEAD")
+
+	out, _ := runODS(t, dir, "detect", "--diff-base", "HEAD~1", "--branch", "main", "--json")
+	var res struct {
+		AIGenerated bool     `json:"ai_generated"`
+		Sources     []string `json:"sources"`
+		Files       []struct {
+			Path       string  `json:"path"`
+			AILines    int     `json:"ai_lines"`
+			TotalLines int     `json:"total_lines"`
+			Confidence float64 `json:"confidence"`
+		} `json:"files"`
+		Evidence []struct {
+			Source string `json:"source"`
+			Value  string `json:"value"`
+		} `json:"evidence"`
+	}
+	mustJSON(t, out, &res)
+
+	if !res.AIGenerated {
+		t.Fatalf("ai_generated = false, want true from git-ai notes")
+	}
+	if !contains(res.Sources, "git-ai-notes") {
+		t.Errorf("sources = %v, want to include git-ai-notes", res.Sources)
+	}
+	if len(res.Files) != 1 || res.Files[0].Path != "svc/handler.go" {
+		t.Fatalf("files = %+v, want exactly svc/handler.go", res.Files)
+	}
+	if res.Files[0].AILines != 6 {
+		t.Errorf("ai_lines = %d, want the measured 6", res.Files[0].AILines)
+	}
+	if res.Files[0].TotalLines == 0 || res.Files[0].AILines > res.Files[0].TotalLines {
+		t.Errorf("total_lines = %d, want > 0 and >= ai_lines", res.Files[0].TotalLines)
+	}
+	found := false
+	for _, ev := range res.Evidence {
+		if ev.Source == "git-ai-notes" {
+			found = true
+			if !strings.Contains(ev.Value, "6 AI line(s)") || !strings.Contains(ev.Value, "cursor/claude-sonnet-4-5") {
+				t.Errorf("evidence value = %q, want line count and agent label", ev.Value)
+			}
+		}
+	}
+	if !found {
+		t.Error("no git-ai-notes evidence emitted")
+	}
+}
+
+// TestPipeline_GitAINotesAbsent locks the graceful path: repos without git-ai
+// notes behave exactly as before (heuristics fallback, no new source).
+func TestPipeline_GitAINotesAbsent(t *testing.T) {
+	dir := initRepo(t)
+	writeFile(t, dir, "plain.go", "package plain\n\nfunc P() int { return 1 }\n")
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-m", "feat: plain change")
+
+	out, _ := runODS(t, dir, "detect", "--diff-base", "HEAD~1", "--branch", "main", "--json")
+	var res struct {
+		Sources []string `json:"sources"`
+	}
+	mustJSON(t, out, &res)
+	if contains(res.Sources, "git-ai-notes") {
+		t.Errorf("sources = %v — git-ai-notes must not appear without notes", res.Sources)
+	}
+}

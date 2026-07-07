@@ -74,6 +74,8 @@ Assisted-by: Claude:claude-3-opus coccinelle sparse
 
 parses the agent (`Claude`) and model version (`claude-3-opus`) into the evidence; the trailing analysis-tool list is not attribution and is ignored. A bare `Assisted-by: Claude` without the model also counts.
 
+Repos using [git-ai](https://github.com/git-ai-project/git-ai) get the highest-fidelity signal: its authorship logs under `refs/notes/ai` (Git AI Standard v3) record **which lines** each agent wrote. When notes are present on commits in the diff range, per-file AI line counts are *measured* from them instead of estimated by the diff heuristics, and the evidence names the agent and model (`AI-assisted commit a1b2c3d (git-ai: 6 AI line(s), cursor/claude-sonnet-4-5)`). AI lines are capped at each file's changed lines so authorship recorded outside the change can't inflate the ratio. Nothing changes on repos without git-ai. Note for CI: git notes aren't fetched by default — run `git fetch origin +refs/notes/ai:refs/notes/ai` after checkout.
+
 This is attribution from signals the tools (or authors) volunteer, not forensic detection: stripping the trailer evades it, and the diff heuristics are only a low-confidence fallback.
 
 ```bash
