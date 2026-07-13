@@ -554,3 +554,20 @@ func TestScaffoldPolicyReviewTier(t *testing.T) {
 		})
 	}
 }
+
+// TestRootHelpListsEverySubcommand guards against the root help's command
+// summary drifting out of sync with the registered commands (report and
+// rules were once missing from it).
+func TestRootHelpListsEverySubcommand(t *testing.T) {
+	long := rootCmd.Long
+	for _, c := range rootCmd.Commands() {
+		name := c.Name()
+		// cobra's built-ins aren't part of the hand-written summary.
+		if name == "help" || name == "completion" {
+			continue
+		}
+		if !strings.Contains(long, name) {
+			t.Errorf("root help summary does not mention subcommand %q", name)
+		}
+	}
+}
