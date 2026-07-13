@@ -11,6 +11,7 @@ import (
 	"github.com/open-delivery-spec/cli/internal/analyzer"
 	"github.com/open-delivery-spec/cli/internal/detector"
 	"github.com/open-delivery-spec/cli/internal/policy"
+	"github.com/open-delivery-spec/cli/internal/profiles"
 	"github.com/open-delivery-spec/cli/internal/rules"
 	"github.com/open-delivery-spec/cli/internal/scorer"
 	"github.com/spf13/cobra"
@@ -525,7 +526,11 @@ func TestScaffoldPolicyReviewTier(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.WriteString(defaultPolicy); err != nil {
+	odsWay, err := profiles.Get("ods-way")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(odsWay.Policy); err != nil {
 		t.Fatal(err)
 	}
 	f.Close()

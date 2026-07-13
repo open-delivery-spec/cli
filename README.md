@@ -262,18 +262,35 @@ $ ods hook install
 
 ```bash
 $ ods init
+Using policy profile: ods-way — Recommended default — block critical issues, surface the rest, route by risk.
   ✅ Created: .github/workflows/ods-ai-quality.yml
   ✅ Created: .ods/policy.rego
 
 ── ODS initialized ──
-
-Next steps:
-  1. Edit .ods/policy.rego to add custom enforcement rules
-  2. Install git hooks:  ods hook install
-  3. Commit and push — ODS will run on your next PR
 ```
 
 `init` is idempotent — existing files are skipped, never overwritten.
+
+#### Policy profiles
+
+You don't start from a blank policy. `--profile` scaffolds `.ods/policy.rego`
+from a ready-made starting point — the ODS analogue of a quality profile:
+
+| Profile | Behavior | Use when |
+|---------|----------|----------|
+| `ods-way` (default) | Block critical issues, surface the rest, route review by risk | The recommended balanced starting point |
+| `strict` | Also block high-severity issues and AI code below a 50% coverage floor | Regulated / high-stakes codebases |
+| `advisory` | **Never blocks** — warns and routes only | Adopting ODS incrementally, or building team trust before enforcing |
+
+```bash
+ods init                     # ods-way (recommended)
+ods init --profile strict    # start from the strict profile
+ods init --profile advisory  # non-blocking, surface-only
+```
+
+The profile is just a starting point — the generated `.ods/policy.rego` is
+plain Rego you own and edit. Switching profiles or writing your own is a
+one-file change, versioned with your code.
 
 ### `ods rules` — Rule Catalogue
 

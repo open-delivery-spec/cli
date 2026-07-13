@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/open-delivery-spec/cli/internal/profiles"
 	"github.com/spf13/cobra"
 )
 
@@ -31,56 +33,7 @@ jobs:
           commits: ${{ github.event.pull_request.commits }}
 `
 
-const defaultPolicy = `package ods.policy
-
-# ODS policy for this repository.
-# Edit the rules below to enforce your team's AI code quality requirements.
-# Documentation: https://github.com/open-delivery-spec/spec
-
-default allow := true
-
-# Block AI code with critical quality issues.
-deny[msg] {
-    issue := input.issues[_]
-    issue.severity == "critical"
-    msg = sprintf("CRITICAL: %s at %s:%d", [issue.rule, issue.file, issue.line])
-}
-
-# Warn when high-confidence AI code has multiple issues.
-warn[msg] {
-    input.ai_generated == true
-    input.ai_confidence > 0.8
-    count(input.issues) > 2
-    msg = "High-confidence AI code with multiple quality issues — enhanced review recommended"
-}
-
-# --- Review routing (optional) ---
-# review_tier tells CI how much human attention this change needs:
-#   "auto"     — low risk: eligible for expedited review or auto-merge
-#   "standard" — normal review (the default)
-#   "elevated" — high risk: request extra reviewers
-# deny always wins — a blocked PR is never routed. Tune the conditions to your
-# team; e.g. add "input.test_coverage >= 0.6" to auto if you publish coverage.
-default review_tier := "standard"
-
-review_tier := "auto" {
-    input.technical_debt_delta <= 1.0
-    not has_high_or_critical
-}
-
-review_tier := "elevated" {
-    input.ai_generated == true
-    has_high_or_critical
-}
-
-has_high_or_critical {
-    input.issues[_].severity == "critical"
-}
-
-has_high_or_critical {
-    input.issues[_].severity == "high"
-}
-`
+var initProfile string
 
 var initCmd = &cobra.Command{
 	Use:   "init",
@@ -89,18 +42,32 @@ var initCmd = &cobra.Command{
 
 Scaffolds:
   • .github/workflows/ods-ai-quality.yml  — CI workflow for AI code quality checks
-  • .ods/policy.rego                       — OPA Rego policy (edit to add custom rules)
+  • .ods/policy.rego                       — an OPA Rego policy from a chosen profile
+
+Policy profiles (--profile) are ready-made starting points:
+  ods-way   (default) block critical issues, surface the rest, route by risk
+  strict    also block high-severity issues and low-coverage AI code
+  advisory  never blocks — warns and routes only (for incremental adoption)
 
 Examples:
-  ods init`,
+  ods init                       # scaffold with the recommended ods-way profile
+  ods init --profile strict      # start from the strict profile
+  ods init --profile advisory    # non-blocking, surface-only`,
 	RunE: runInit,
 }
 
 func init() {
 	rootCmd.AddCommand(initCmd)
+	initCmd.Flags().StringVar(&initProfile, "profile", profiles.Default,
+		fmt.Sprintf("policy profile to scaffold (%s)", strings.Join(profiles.Names(), ", ")))
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
+	profile, err := profiles.Get(initProfile)
+	if err != nil {
+		return err
+	}
+
 	workflowsDir := filepath.Join(".github", "workflows")
 	odsDir := ".ods"
 
@@ -112,8 +79,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	files := map[string]string{
 		filepath.Join(workflowsDir, "ods-ai-quality.yml"): odsWorkflow,
-		filepath.Join(odsDir, "policy.rego"):              defaultPolicy,
+		filepath.Join(odsDir, "policy.rego"):              profile.Policy,
 	}
+
+	fmt.Printf("Using policy profile: %s — %s\n", profile.Name, profile.Summary)
 
 	for path, content := range files {
 		if _, err := os.Stat(path); err == nil {
