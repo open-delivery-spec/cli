@@ -21,6 +21,8 @@ Commands:
   analyze  Analyze AI code quality
   score    Score technical debt impact
   check    Evaluate OPA Rego policy
+  report   Summarize AI-assisted vs human work over recent history
+  rules    List the built-in AI code quality rules
   hook     Install git hooks
   init     Scaffold ODS configuration
 
