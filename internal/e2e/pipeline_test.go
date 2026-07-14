@@ -629,4 +629,27 @@ func TestPipeline_AIReviewVerdict(t *testing.T) {
 			t.Error("stale verdict must not influence routing")
 		}
 	})
+
+	t.Run("ODS_HEAD_SHA overrides the checked-out HEAD", func(t *testing.T) {
+		// CI checks out a synthetic merge commit on pull_request events, so a
+		// verdict stamped with the PR head SHA never matches `git rev-parse
+		// HEAD` there. ODS_HEAD_SHA tells check what to compare against.
+		writeVerdict("stamped.json", "cafe1234")
+		cmd := exec.Command(odsBin, "check", "--ai-review", "stamped.json", "--json")
+		cmd.Dir = dir
+		cmd.Env = append(hermeticEnv(), "ODS_HEAD_SHA=cafe1234aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+		var stdout, stderr strings.Builder
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("check failed: %v\n%s", err, stderr.String())
+		}
+		var res struct {
+			ReviewTier string `json:"review_tier"`
+		}
+		mustJSON(t, stdout.String(), &res)
+		if res.ReviewTier != "elevated" {
+			t.Errorf("review_tier = %q, want elevated — stamped verdict must match ODS_HEAD_SHA, not repo HEAD", res.ReviewTier)
+		}
+	})
 }

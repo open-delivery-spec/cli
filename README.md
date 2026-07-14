@@ -266,6 +266,12 @@ Verdicts stamped with a `head_sha` that doesn't match the current HEAD are
 skipped with a warning — stale opinions about an older commit never enter the
 gate. The LLM runs outside the gate; the gate stays deterministic.
 
+In CI on `pull_request` events the checkout is a synthetic merge commit, so
+`git rev-parse HEAD` is not the SHA reviewers stamped. Set `ODS_HEAD_SHA` to
+the PR head SHA (`github.event.pull_request.head.sha`) and `check` compares
+against that instead; the [validate-action](https://github.com/open-delivery-spec/validate-action)
+does this automatically.
+
 #### Review routing: `review_tier`
 
 Beyond allow/deny, a policy can answer a second question: **how much human

@@ -351,9 +351,15 @@ func printCheckResult(cmd *cobra.Command, result *policy.EvalResult, policyPath 
 	}
 }
 
-// gitHeadSHA returns the current HEAD commit SHA, or "" outside a git repo
+// gitHeadSHA returns the commit that review verdicts are matched against.
+// ODS_HEAD_SHA wins when set: CI checks out a synthetic merge commit on
+// pull_request events, so `git rev-parse HEAD` is not the SHA reviewers
+// stamped into their verdicts. Falls back to HEAD, or "" outside a git repo
 // (callers treat the empty value as "nothing to compare against").
 func gitHeadSHA() string {
+	if sha := os.Getenv("ODS_HEAD_SHA"); sha != "" {
+		return sha
+	}
 	out, err := exec.Command("git", "rev-parse", "HEAD").Output()
 	if err != nil {
 		return ""
