@@ -520,3 +520,52 @@ func TestPipeline_GitAINotesAbsent(t *testing.T) {
 		t.Errorf("sources = %v — git-ai-notes must not appear without notes", res.Sources)
 	}
 }
+
+// TestAnalyze_PositionalFileArgs covers the entry point pre-commit uses: the
+// analyzer is handed explicit staged filenames as positional args, analyzes
+// the code ones (skipping non-code), and blocks (non-zero) on a critical
+// finding.
+func TestAnalyze_PositionalFileArgs(t *testing.T) {
+	dir := initRepo(t)
+	// A file with an unsafe-deserialization critical finding.
+	writeFile(t, dir, "load.go", `package m
+import "encoding/json"
+func Load(b []byte) interface{} {
+	var v interface{}
+	json.Unmarshal(b, &v)
+	return v
+}
+`)
+	writeFile(t, dir, "notes.md", "# just docs\n")
+
+	t.Run("analyzes code arg and surfaces the high finding", func(t *testing.T) {
+		out, _ := runODS(t, dir, "analyze", "load.go", "--json")
+		if !strings.Contains(out, "ai-unsafe-deserialization") {
+			t.Errorf("expected the rule in output: %s", out)
+		}
+	})
+
+	t.Run("--fail-on high blocks on a high finding (pre-commit gate)", func(t *testing.T) {
+		_, exit := runODS(t, dir, "analyze", "load.go", "--fail-on", "high", "--json")
+		if exit == 0 {
+			t.Errorf("exit = 0, want non-zero with --fail-on high on a high finding")
+		}
+	})
+
+	t.Run("default --fail-on critical does not block on a high finding", func(t *testing.T) {
+		_, exit := runODS(t, dir, "analyze", "load.go", "--json")
+		if exit != 0 {
+			t.Errorf("exit = %d, want 0 (high < critical default threshold)", exit)
+		}
+	})
+
+	t.Run("skips non-code args", func(t *testing.T) {
+		out, exit := runODS(t, dir, "analyze", "notes.md", "--fail-on", "high", "--json")
+		if exit != 0 {
+			t.Errorf("exit = %d, want 0 when only non-code files are passed", exit)
+		}
+		if strings.Contains(out, "ai-unsafe-deserialization") {
+			t.Errorf("non-code file should not be analyzed: %s", out)
+		}
+	})
+}
