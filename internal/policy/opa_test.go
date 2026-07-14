@@ -331,3 +331,84 @@ func TestReviewTierAbsentStaysEmpty(t *testing.T) {
 		t.Errorf("review_tier = %q, want empty (rule not defined)", result.ReviewTier)
 	}
 }
+
+// ── AI reviewer verdicts (input.ai_reviews) ──────────────────────────────────
+
+func TestDefaultPolicyAIReviewRoutesNotDenies(t *testing.T) {
+	path := writeTempPolicy(t, DefaultRegoPolicy())
+
+	in := &EvalInput{
+		AIReviews: []EvalAIReview{{
+			Tool:    "claude-code",
+			Verdict: "request_changes",
+			Findings: []EvalReviewIssue{
+				{File: "a.go", Line: 1, Severity: "high", Message: "logic error"},
+			},
+		}},
+	}
+	res, err := Evaluate(path, in)
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+	// Core contract: probabilistic opinions tighten, never deny.
+	if !res.Allowed {
+		t.Errorf("AI review must not deny by default, got denials: %v", res.Denials)
+	}
+	if res.ReviewTier != ReviewTierElevated {
+		t.Errorf("review_tier = %q, want elevated on request_changes", res.ReviewTier)
+	}
+	found := false
+	for _, w := range res.Warnings {
+		if strings.Contains(w, "claude-code") && strings.Contains(w, "requested changes") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a request-changes warning, got %v", res.Warnings)
+	}
+}
+
+func TestDefaultPolicyAIReviewApproveIsNeutral(t *testing.T) {
+	path := writeTempPolicy(t, DefaultRegoPolicy())
+	in := &EvalInput{
+		AIReviews: []EvalAIReview{{Tool: "coderabbit", Verdict: "approve"}},
+	}
+	res, err := Evaluate(path, in)
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+	// An approve must not loosen anything: no tier change, no warnings from it.
+	if !res.Allowed {
+		t.Errorf("approve should not deny: %v", res.Denials)
+	}
+	if res.ReviewTier == ReviewTierAuto {
+		t.Error("an AI approve must never grant the auto tier by itself")
+	}
+}
+
+func TestOptInDenyOverAIReviews(t *testing.T) {
+	// Teams can explicitly opt in to enforcement over ai_reviews.
+	path := writeTempPolicy(t, `package ods.policy
+
+default allow := true
+
+deny[msg] {
+    f := input.ai_reviews[_].findings[_]
+    f.severity == "high"
+    msg = sprintf("AI review high finding: %s", [f.message])
+}
+`)
+	in := &EvalInput{
+		AIReviews: []EvalAIReview{{
+			Tool: "x", Verdict: "request_changes",
+			Findings: []EvalReviewIssue{{Severity: "high", Message: "boom"}},
+		}},
+	}
+	res, err := Evaluate(path, in)
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+	if res.Allowed {
+		t.Error("explicit opt-in deny over ai_reviews must be able to block")
+	}
+}

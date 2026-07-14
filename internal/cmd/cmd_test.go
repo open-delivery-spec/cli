@@ -541,6 +541,14 @@ func TestScaffoldPolicyReviewTier(t *testing.T) {
 			Issues:      []policy.EvalIssue{{Rule: "x", Severity: "high", File: "a.go"}},
 		}, "elevated"},
 		{"mid-delta change routes standard", &policy.EvalInput{TechnicalDebtDelta: 2.0}, "standard"},
+		{"AI review request_changes routes elevated", &policy.EvalInput{
+			TechnicalDebtDelta: 0.5, // auto conditions hold — elevated must still win without a Rego conflict
+			AIReviews:          []policy.EvalAIReview{{Tool: "claude-code", Verdict: "request_changes"}},
+		}, "elevated"},
+		{"AI review approve leaves auto intact", &policy.EvalInput{
+			TechnicalDebtDelta: 0.5,
+			AIReviews:          []policy.EvalAIReview{{Tool: "claude-code", Verdict: "approve"}},
+		}, "auto"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -569,3 +569,87 @@ func Load(b []byte) interface{} {
 		}
 	})
 }
+
+// TestPipeline_AIReviewVerdict covers Gap 1 end to end: an AI reviewer's
+// request_changes verdict routes the review tier to elevated without denying
+// (probabilistic opinions tighten, never block, unless a policy opts in), and
+// a verdict stamped for a different commit is skipped as stale.
+func TestPipeline_AIReviewVerdict(t *testing.T) {
+	dir := initRepo(t)
+	writeFile(t, dir, "svc.go", "package svc\n\nfunc S() int { return 1 }\n")
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-m", "feat: add svc")
+
+	writeVerdict := func(name, headSHA string) string {
+		v := `{
+  "schema": "ods.dev/review-verdict/v1",
+  "reviewer": {"tool": "claude-code", "model": "claude-sonnet-4-5"},
+  "head_sha": "` + headSHA + `",
+  "verdict": "request_changes",
+  "findings": [
+    {"file": "svc.go", "line": 3, "severity": "high",
+     "category": "correctness", "message": "S ignores its error path"}
+  ]
+}`
+		writeFile(t, dir, name, v)
+		return name
+	}
+
+	t.Run("request_changes elevates without denying", func(t *testing.T) {
+		writeVerdict("review.json", "") // unstamped: applies to any head
+		out, exit := runODS(t, dir, "check", "--ai-review", "review.json", "--json")
+		if exit != 0 {
+			t.Fatalf("exit = %d, want 0 — AI review must not deny by default\n%s", exit, out)
+		}
+		var res struct {
+			Allowed    bool     `json:"allowed"`
+			ReviewTier string   `json:"review_tier"`
+			Warnings   []string `json:"warnings"`
+		}
+		mustJSON(t, out, &res)
+		if !res.Allowed {
+			t.Error("allowed = false, want true")
+		}
+		if res.ReviewTier != "elevated" {
+			t.Errorf("review_tier = %q, want elevated", res.ReviewTier)
+		}
+	})
+
+	t.Run("stale verdict for another commit is skipped", func(t *testing.T) {
+		writeVerdict("stale.json", "0000000deadbeef")
+		out, _, exit := runODSStreams(t, dir, "check", "--ai-review", "stale.json", "--json")
+		if exit != 0 {
+			t.Fatalf("exit = %d, want 0", exit)
+		}
+		var res struct {
+			ReviewTier string `json:"review_tier"`
+		}
+		mustJSON(t, out, &res)
+		if res.ReviewTier == "elevated" {
+			t.Error("stale verdict must not influence routing")
+		}
+	})
+
+	t.Run("ODS_HEAD_SHA overrides the checked-out HEAD", func(t *testing.T) {
+		// CI checks out a synthetic merge commit on pull_request events, so a
+		// verdict stamped with the PR head SHA never matches `git rev-parse
+		// HEAD` there. ODS_HEAD_SHA tells check what to compare against.
+		writeVerdict("stamped.json", "cafe1234")
+		cmd := exec.Command(odsBin, "check", "--ai-review", "stamped.json", "--json")
+		cmd.Dir = dir
+		cmd.Env = append(hermeticEnv(), "ODS_HEAD_SHA=cafe1234aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+		var stdout, stderr strings.Builder
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("check failed: %v\n%s", err, stderr.String())
+		}
+		var res struct {
+			ReviewTier string `json:"review_tier"`
+		}
+		mustJSON(t, stdout.String(), &res)
+		if res.ReviewTier != "elevated" {
+			t.Errorf("review_tier = %q, want elevated — stamped verdict must match ODS_HEAD_SHA, not repo HEAD", res.ReviewTier)
+		}
+	})
+}
