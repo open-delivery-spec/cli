@@ -19,7 +19,7 @@ This is the new reality of AI-assisted development. AI code increases technical 
 | **Hallucinated APIs** | AI invents functions, packages, and endpoints that don’t exist |
 | **Redundant error handling** | AI over-defends: 3+ identical `if err != nil` blocks in the same function |
 | **Over-commenting** | AI writes 35%+ comment-to-code ratio with self-explanatory comments |
-| **No test coverage** | AI PRs average 22% test coverage vs 68% for human PRs |
+| **No test coverage** | AI-generated PRs often ship with little or no accompanying tests |
 | **Invisible AI code** | Teams can’t distinguish AI-generated from human-written changes |
 | **Scope drift** | AI changes files unrelated to the stated feature |
 
@@ -161,8 +161,12 @@ $ ods analyze --file internal/scanner/sarif.go --json
 | `--file`, `-f` | — | Analyze a single file |
 | `--dir`, `-d` | — | Analyze a directory (recursively) |
 | `--ai-only` | `false` | Only files detected as AI-generated |
+| `--fail-on` | `critical` | Minimum severity that exits non-zero: `info`, `low`, `medium`, `high`, `critical` |
 | `--json` | `false` | JSON output |
 | `--format` | `summary` | Output format: `summary`, `detail`, `json` |
+
+`ods analyze` also accepts file paths as positional arguments (`ods analyze a.go b.py`),
+analyzing those files and skipping non-code ones — the entry point the pre-commit hook uses.
 
 ### `ods score` — Technical Debt Impact
 
@@ -257,6 +261,23 @@ $ ods hook install
 ✅  prepare-commit-msg hook installed at .git/hooks/prepare-commit-msg
 ✅  pre-push hook installed at .git/hooks/pre-push
 ```
+
+### pre-commit framework
+
+Teams using [pre-commit](https://pre-commit.com) can add ODS's local quality
+gate in one entry — the same analysis CI runs, but before you push:
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/open-delivery-spec/cli
+    rev: v0.6.0
+    hooks:
+      - id: ods-analyze          # blocks the commit on high/critical findings
+```
+
+Override the threshold per repo with `args: [--fail-on, critical]` (laxer) or
+`[--fail-on, medium]` (stricter).
 
 ### `ods init` — Project Scaffolding
 

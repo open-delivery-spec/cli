@@ -1,0 +1,20 @@
+# ODS hooks for the pre-commit framework (https://pre-commit.com).
+# Add to your .pre-commit-config.yaml:
+#
+#   repos:
+#     - repo: https://github.com/open-delivery-spec/cli
+#       rev: v0.6.0
+#       hooks:
+#         - id: ods-analyze
+#
+# This gives local, pre-commit feedback on AI code quality — the same analysis
+# the CI gate runs, but before you push. By default it blocks the commit on
+# high-or-critical findings; override with `args: [--fail-on, critical]` to
+# only block on critical, or `[--fail-on, medium]` to be stricter.
+- id: ods-analyze
+  name: ODS — analyze AI code quality
+  description: Analyze staged code for AI-generated quality defects; blocks on high/critical.
+  entry: ods analyze --fail-on high
+  language: golang
+  types: [text]
+  pass_filenames: true

@@ -22,7 +22,29 @@ var (
 	analyzeFormat   string
 	analyzeSARIF    string
 	analyzeDiffBase string
+	analyzeFailOn   string
 )
+
+// severityRank orders severities for threshold comparisons.
+var severityRank = map[string]int{
+	"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4,
+}
+
+// issuesAtLeast counts issues whose severity is at or above the named
+// threshold. Unknown thresholds fall back to "critical".
+func issuesAtLeast(result *analyzer.AnalysisResult, threshold string) int {
+	min, ok := severityRank[strings.ToLower(threshold)]
+	if !ok {
+		min = severityRank["critical"]
+	}
+	n := 0
+	for _, iss := range result.Issues {
+		if severityRank[iss.Severity] >= min {
+			n++
+		}
+	}
+	return n
+}
 
 // resolveDiffBase picks the git diff base consistently across commands: an
 // explicit --diff-base flag wins, then the ODS_DIFF_BASE env var (set by
@@ -80,6 +102,8 @@ func init() {
 		"output as JSON")
 	analyzeCmd.Flags().StringVar(&analyzeFormat, "format", "summary",
 		"output format: summary, detail, json")
+	analyzeCmd.Flags().StringVar(&analyzeFailOn, "fail-on", "critical",
+		"minimum severity that makes analyze exit non-zero: info, low, medium, high, critical")
 	analyzeCmd.Flags().StringVar(&analyzeSARIF, "sarif", "",
 		"SARIF v2.1.0 file to merge into the analysis result")
 	analyzeCmd.Flags().StringVar(&analyzeDiffBase, "diff-base", "",
@@ -89,7 +113,22 @@ func init() {
 func runAnalyze(cmd *cobra.Command, args []string) error {
 	var files map[string][]string
 
-	if analyzeFile != "" {
+	if len(args) > 0 {
+		// Explicit file arguments (e.g. from a pre-commit hook passing staged
+		// filenames). Non-code files are skipped so the hook can be pointed at
+		// a broad fileset without erroring on docs/config.
+		files = map[string][]string{}
+		for _, f := range args {
+			if !isCodeFileExt(f) {
+				continue
+			}
+			data, err := os.ReadFile(f)
+			if err != nil {
+				return fmt.Errorf("reading file %s: %w", f, err)
+			}
+			files[f] = strings.Split(string(data), "\n")
+		}
+	} else if analyzeFile != "" {
 		data, err := os.ReadFile(analyzeFile)
 		if err != nil {
 			return fmt.Errorf("reading file %s: %w", analyzeFile, err)
@@ -175,9 +214,12 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 		printAnalyzeSummary(cmd, result)
 	}
 
-	// Exit non-zero if critical issues found
-	if result.HasCritical() {
-		return fmt.Errorf("critical quality issues found: %d", result.CriticalCount())
+	// Exit non-zero when issues meet the --fail-on severity threshold
+	// (default: critical, preserving prior behavior). Lower severities are
+	// surfaced but do not fail the run.
+	if n := issuesAtLeast(result, analyzeFailOn); n > 0 {
+		cmd.SilenceUsage = true
+		return fmt.Errorf("%d quality issue(s) at or above severity %q", n, strings.ToLower(analyzeFailOn))
 	}
 	return nil
 }

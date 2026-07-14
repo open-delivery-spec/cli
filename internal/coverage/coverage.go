@@ -25,11 +25,11 @@ const NotMeasured = -1.0
 type Source string
 
 const (
-	SourceGo       Source = "go"
-	SourceLCOV     Source = "lcov"
+	SourceGo        Source = "go"
+	SourceLCOV      Source = "lcov"
 	SourceCobertura Source = "cobertura"
-	SourceNYC      Source = "nyc"
-	SourceUnknown  Source = "unknown"
+	SourceNYC       Source = "nyc"
+	SourceUnknown   Source = "unknown"
 )
 
 // Result carries the parsed coverage fraction and its provenance.
