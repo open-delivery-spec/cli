@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/open-delivery-spec/cli/internal/analyzer"
@@ -11,6 +12,7 @@ import (
 	"github.com/open-delivery-spec/cli/internal/detector"
 	"github.com/open-delivery-spec/cli/internal/logx"
 	"github.com/open-delivery-spec/cli/internal/policy"
+	"github.com/open-delivery-spec/cli/internal/review"
 	"github.com/open-delivery-spec/cli/internal/sarif"
 	"github.com/open-delivery-spec/cli/internal/scorer"
 	"github.com/spf13/cobra"
@@ -21,6 +23,7 @@ var (
 	checkJSON       bool
 	checkSARIF      string
 	checkDiffBase   string
+	checkAIReviews  []string
 )
 
 var checkCmd = &cobra.Command{
@@ -58,6 +61,8 @@ func init() {
 		"SARIF v2.1.0 file whose findings are merged into the policy input")
 	checkCmd.Flags().StringVar(&checkDiffBase, "diff-base", "",
 		"git ref to diff against (default: $ODS_DIFF_BASE or HEAD~1)")
+	checkCmd.Flags().StringArrayVar(&checkAIReviews, "ai-review", nil,
+		"AI review verdict file (ods.dev/review-verdict/v1); repeatable. Advisory by default: routes review attention, never denies unless your policy opts in")
 }
 
 func runCheck(cmd *cobra.Command, args []string) error {
@@ -218,6 +223,44 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		})
 	}
 
+	// Attach AI reviewer verdicts. Verdicts stamped for a different commit are
+	// stale opinions and are skipped with a warning — they must not enter the
+	// gate. Load errors are also non-fatal: a malformed advisory input must
+	// not break the deterministic gate.
+	if len(checkAIReviews) > 0 {
+		headSHA := gitHeadSHA()
+		for _, path := range checkAIReviews {
+			v, err := review.Load(path)
+			if err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: skipping AI review: %v\n", err)
+				continue
+			}
+			if !v.MatchesHead(headSHA) {
+				fmt.Fprintf(cmd.ErrOrStderr(),
+					"Warning: skipping AI review %s: verdict is for commit %s, HEAD is %s\n",
+					path, v.HeadSHA, headSHA)
+				continue
+			}
+			ar := policy.EvalAIReview{
+				Tool:    v.Reviewer.Tool,
+				Model:   v.Reviewer.Model,
+				Verdict: v.Verdict,
+			}
+			for _, f := range v.Findings {
+				ar.Findings = append(ar.Findings, policy.EvalReviewIssue{
+					File:     f.File,
+					Line:     f.Line,
+					Severity: f.Severity,
+					Category: f.Category,
+					Message:  f.Message,
+				})
+			}
+			evalInput.AIReviews = append(evalInput.AIReviews, ar)
+			logx.Debugf("check: attached AI review from %s (%s, %d finding(s))",
+				v.Reviewer.Tool, v.Verdict, len(v.Findings))
+		}
+	}
+
 	// Evaluate policy
 	var result *policy.EvalResult
 	if useDefault {
@@ -306,4 +349,14 @@ func printCheckResult(cmd *cobra.Command, result *policy.EvalResult, policyPath 
 			fmt.Fprintf(cmd.OutOrStdout(), "     ⚠️  %s\n", w)
 		}
 	}
+}
+
+// gitHeadSHA returns the current HEAD commit SHA, or "" outside a git repo
+// (callers treat the empty value as "nothing to compare against").
+func gitHeadSHA() string {
+	out, err := exec.Command("git", "rev-parse", "HEAD").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }

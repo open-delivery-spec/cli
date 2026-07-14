@@ -222,6 +222,49 @@ $ ods check --json
 | `--policy`, `-p` | `.ods/policy.rego` | Path to Rego policy file |
 | `--json` | `false` | JSON output |
 | `--sarif` | — | SARIF file whose findings are merged into the policy input |
+| `--ai-review` | — | AI review verdict file (`review-verdict/v1`); repeatable. Advisory: routes attention, never denies unless your policy opts in |
+
+#### AI reviewer verdicts: `--ai-review`
+
+Static analysis covers known defect patterns; AI code reviewers (Copilot code
+review, CodeRabbit, Claude Code's `/review`, …) cover the semantic layer — is
+the logic right, does the change do what it claims. `ods check --ai-review
+<file>` (repeatable) feeds their conclusions into the same gate as a
+[`review-verdict/v1`](https://github.com/open-delivery-spec/spec) JSON file:
+
+```json
+{
+  "schema": "ods.dev/review-verdict/v1",
+  "reviewer": {"tool": "claude-code", "model": "claude-sonnet-4-5"},
+  "head_sha": "a1b2c3d",
+  "verdict": "request_changes",
+  "findings": [
+    {"file": "src/auth.py", "line": 42, "severity": "high",
+     "category": "correctness",
+     "message": "Token expiry is never checked before refresh"}
+  ]
+}
+```
+
+The design principle: **deterministic findings may deny; probabilistic
+opinions only route attention.** By default an AI review can only *tighten*
+the gate — a `request_changes` verdict raises `review_tier` to `elevated`
+(more human eyes) and adds a warning; it never denies, and an `approve` never
+loosens anything (an LLM verdict steered by the code under review must not be
+able to unlock auto-merge). Teams that want LLM findings to block can opt in
+explicitly in their own Rego over `input.ai_reviews`:
+
+```rego
+deny[msg] {
+    f := input.ai_reviews[_].findings[_]
+    f.severity == "high"
+    msg = sprintf("AI review high finding: %s", [f.message])
+}
+```
+
+Verdicts stamped with a `head_sha` that doesn't match the current HEAD are
+skipped with a warning — stale opinions about an older commit never enter the
+gate. The LLM runs outside the gate; the gate stays deterministic.
 
 #### Review routing: `review_tier`
 

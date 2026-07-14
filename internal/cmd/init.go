@@ -66,11 +66,23 @@ default review_tier := "standard"
 review_tier := "auto" {
     input.technical_debt_delta <= 1.0
     not has_high_or_critical
+    not ai_review_requests_changes
 }
 
 review_tier := "elevated" {
     input.ai_generated == true
     has_high_or_critical
+}
+
+# AI reviewer verdicts (input.ai_reviews) are probabilistic: by default they
+# only tighten the gate — a request_changes routes extra human review, never
+# denies. Write your own deny over input.ai_reviews to opt in to enforcement.
+review_tier := "elevated" {
+    ai_review_requests_changes
+}
+
+ai_review_requests_changes {
+    input.ai_reviews[_].verdict == "request_changes"
 }
 
 has_high_or_critical {

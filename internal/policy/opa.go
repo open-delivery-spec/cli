@@ -51,6 +51,28 @@ type EvalInput struct {
 	ChangedFiles       []string       `json:"changed_files"`
 	Branch             string         `json:"branch"`
 	Committer          string         `json:"committer"`
+	// AIReviews carries AI code-reviewer verdicts (semantic review). They are
+	// kept separate from Issues on purpose: deterministic findings may deny,
+	// probabilistic opinions default to routing attention only. Policies that
+	// want LLM findings to block must opt in explicitly over this section.
+	AIReviews []EvalAIReview `json:"ai_reviews,omitempty"`
+}
+
+// EvalAIReview is one AI reviewer's verdict in the policy input.
+type EvalAIReview struct {
+	Tool     string            `json:"tool"`
+	Model    string            `json:"model,omitempty"`
+	Verdict  string            `json:"verdict"` // approve | request_changes | comment
+	Findings []EvalReviewIssue `json:"findings,omitempty"`
+}
+
+// EvalReviewIssue is one semantic finding from an AI reviewer.
+type EvalReviewIssue struct {
+	File     string `json:"file,omitempty"`
+	Line     int    `json:"line,omitempty"`
+	Severity string `json:"severity,omitempty"`
+	Category string `json:"category,omitempty"`
+	Message  string `json:"message"`
 }
 
 // EvalFileInfo describes an AI-detected file.
@@ -241,6 +263,19 @@ warn[msg] {
     input.test_coverage < 0.3
     pct := round(input.test_coverage * 100)
     msg = sprintf("AI-generated code has only %d%% test coverage", [pct])
+}
+
+# AI reviewer verdicts are probabilistic: by default they only tighten the
+# gate (route more human attention), never deny. Teams may opt in to harder
+# enforcement over input.ai_reviews in their own policy.
+review_tier := "elevated" {
+    input.ai_reviews[_].verdict == "request_changes"
+}
+
+warn[msg] {
+    rev := input.ai_reviews[_]
+    rev.verdict == "request_changes"
+    msg = sprintf("AI reviewer %s requested changes (%d finding(s)) — extra review routed", [rev.tool, count(rev.findings)])
 }
 `
 }
