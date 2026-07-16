@@ -35,7 +35,7 @@ ODS runs on every PR in the `open-delivery-spec` org (dogfooding):
 [![ODS on cli](https://github.com/open-delivery-spec/cli/actions/workflows/ods-validate.yml/badge.svg)](https://github.com/open-delivery-spec/cli/actions/workflows/ods-validate.yml)
 [![ODS on validate-action](https://github.com/open-delivery-spec/validate-action/actions/workflows/ods-validate.yml/badge.svg)](https://github.com/open-delivery-spec/validate-action/actions/workflows/ods-validate.yml)
 
-See [ADOPTERS.md](https://github.com/open-delivery-spec/spec/blob/main/ADOPTERS.md) for the full list and pending external adoption.
+External repositories including [devops-maturity](https://github.com/devops-maturity/devops-maturity) and [conventional-branch](https://github.com/conventional-branch/conventional-branch) run it on every PR as well — see [ADOPTERS.md](https://github.com/open-delivery-spec/spec/blob/main/ADOPTERS.md) for the full list.
 
 ---
 
