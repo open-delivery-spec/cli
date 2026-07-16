@@ -195,6 +195,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	evalInput := &policy.EvalInput{
 		AIGenerated:        detectResult.AIGenerated,
 		AIConfidence:       detectResult.Confidence,
+		DetectionSources:   detectResult.Sources,
 		TechnicalDebtDelta: scoreResult.TechnicalDebtDelta,
 		TestCoverage:       scoreResult.Breakdown.TestCoverage,
 		TestCoverageSource: scoreResult.Breakdown.TestCoverageSource,

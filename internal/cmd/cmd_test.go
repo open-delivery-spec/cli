@@ -549,6 +549,24 @@ func TestScaffoldPolicyReviewTier(t *testing.T) {
 			TechnicalDebtDelta: 0.5,
 			AIReviews:          []policy.EvalAIReview{{Tool: "claude-code", Verdict: "approve"}},
 		}, "auto"},
+		{"undisclosed suspected AI routes elevated", &policy.EvalInput{
+			TechnicalDebtDelta: 0.5, // auto conditions hold — elevated must still win without a Rego conflict
+			AIGenerated:        true,
+			AIConfidence:       0.6,
+			DetectionSources:   []string{"branch-name", "diff-heuristics"},
+		}, "elevated"},
+		{"disclosed AI keeps auto", &policy.EvalInput{
+			TechnicalDebtDelta: 0.5,
+			AIGenerated:        true,
+			AIConfidence:       0.9,
+			DetectionSources:   []string{"commit-trailer"},
+		}, "auto"},
+		{"weak undisclosed suspicion stays below routing threshold", &policy.EvalInput{
+			TechnicalDebtDelta: 0.5,
+			AIGenerated:        true,
+			AIConfidence:       0.35, // branch prefix alone — warns, but does not re-route
+			DetectionSources:   []string{"branch-name"},
+		}, "auto"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

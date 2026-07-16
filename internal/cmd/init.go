@@ -54,6 +54,37 @@ warn[msg] {
     msg = "High-confidence AI code with multiple quality issues — enhanced review recommended"
 }
 
+# --- Disclosure completeness ---
+# SFC guidance and the kernel docs both require authors to disclose AI
+# involvement (what tool, what model, how it participated). These rules make
+# that norm checkable: AI signals without any author attribution get flagged
+# and routed to extra review — never blocked.
+ai_disclosed {
+    input.detection_sources[_] == "commit-trailer"
+}
+
+ai_disclosed {
+    input.detection_sources[_] == "git-ai-notes"
+}
+
+ai_disclosed {
+    input.detection_sources[_] == "pr-body"
+}
+
+ai_undisclosed {
+    input.ai_generated == true
+    # Suspicion threshold for routing: tune to your tolerance for heuristic
+    # false positives (branch prefix alone scores 0.35).
+    input.ai_confidence >= 0.5
+    not ai_disclosed
+}
+
+warn[msg] {
+    input.ai_generated == true
+    not ai_disclosed
+    msg = "AI code detected without author disclosure — ask for attribution (Co-Authored-By/Assisted-by trailer, or an AI disclosure in the PR body)"
+}
+
 # --- Review routing (optional) ---
 # review_tier tells CI how much human attention this change needs:
 #   "auto"     — low risk: eligible for expedited review or auto-merge
@@ -67,11 +98,17 @@ review_tier := "auto" {
     input.technical_debt_delta <= 1.0
     not has_high_or_critical
     not ai_review_requests_changes
+    not ai_undisclosed
 }
 
 review_tier := "elevated" {
     input.ai_generated == true
     has_high_or_critical
+}
+
+# Suspected-but-undisclosed AI costs review attention, never a merge.
+review_tier := "elevated" {
+    ai_undisclosed
 }
 
 # AI reviewer verdicts (input.ai_reviews) are probabilistic: by default they

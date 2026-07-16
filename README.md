@@ -224,6 +224,36 @@ $ ods check --json
 | `--sarif` | — | SARIF file whose findings are merged into the policy input |
 | `--ai-review` | — | AI review verdict file (`review-verdict/v1`); repeatable. Advisory: routes attention, never denies unless your policy opts in |
 
+#### Disclosure completeness: `input.detection_sources`
+
+The [SFC guidance](https://sfconservancy.org/) and the
+[kernel docs](https://docs.kernel.org/process/coding-assistants.html) agree on
+one duty: **the author discloses AI involvement** (what tool, what model, how
+it participated) — it's not the maintainer's job to guess. ODS makes that norm
+checkable at the gate. The policy input carries `detection_sources` — which
+signals fired (`commit-trailer`, `git-ai-notes`, `pr-body`, `branch-name`,
+`diff-heuristics`) — so a policy can separate *disclosed* AI use from merely
+*suspected* AI use:
+
+```rego
+ai_disclosed { input.detection_sources[_] == "commit-trailer" }
+ai_disclosed { input.detection_sources[_] == "git-ai-notes" }
+ai_disclosed { input.detection_sources[_] == "pr-body" }
+
+# Suspected AI without any author attribution → ask for it (never block)
+warn[msg] {
+    input.ai_generated == true
+    not ai_disclosed
+    msg = "AI code detected without author disclosure — ask for attribution"
+}
+```
+
+The default policy ships this warning; the `ods init` scaffold additionally
+routes undisclosed suspicion (confidence ≥ 0.5) to the `elevated` review tier.
+Undisclosed AI costs review attention, never a merge — and adding a
+`Co-Authored-By`/`Assisted-by` trailer or a PR-body disclosure silences the
+nudge.
+
 #### AI reviewer verdicts: `--ai-review`
 
 Static analysis covers known defect patterns; AI code reviewers (Copilot code

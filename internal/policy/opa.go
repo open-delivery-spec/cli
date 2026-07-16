@@ -41,8 +41,14 @@ type EvalResult struct {
 // TestCoverage is −1 when coverage was not measured; policies that check
 // coverage MUST guard with `input.test_coverage >= 0`.
 type EvalInput struct {
-	AIGenerated        bool           `json:"ai_generated"`
-	AIConfidence       float64        `json:"ai_confidence"`
+	AIGenerated  bool    `json:"ai_generated"`
+	AIConfidence float64 `json:"ai_confidence"`
+	// DetectionSources lists which detection signals fired (commit-trailer,
+	// git-ai-notes, pr-body, branch-name, diff-heuristics). It lets policies
+	// separate *disclosed* AI use (author attribution: commit-trailer,
+	// git-ai-notes, pr-body) from merely *suspected* AI use, so the SFC/kernel
+	// disclosure norms become checkable at the gate.
+	DetectionSources   []string       `json:"detection_sources,omitempty"`
 	AIFiles            []EvalFileInfo `json:"ai_files"`
 	Issues             []EvalIssue    `json:"issues"`
 	TechnicalDebtDelta float64        `json:"technical_debt_delta"`
@@ -263,6 +269,27 @@ warn[msg] {
     input.test_coverage < 0.3
     pct := round(input.test_coverage * 100)
     msg = sprintf("AI-generated code has only %d%% test coverage", [pct])
+}
+
+# Disclosure completeness: the SFC guidance and the kernel docs both say AI
+# involvement should be disclosed by the author (trailers, PR disclosure),
+# not left for heuristics to suspect. Nudge, never block.
+ai_disclosed {
+    input.detection_sources[_] == "commit-trailer"
+}
+
+ai_disclosed {
+    input.detection_sources[_] == "git-ai-notes"
+}
+
+ai_disclosed {
+    input.detection_sources[_] == "pr-body"
+}
+
+warn[msg] {
+    input.ai_generated == true
+    not ai_disclosed
+    msg = "AI code detected without author disclosure — ask for attribution (Co-Authored-By/Assisted-by trailer, or an AI disclosure in the PR body)"
 }
 
 # AI reviewer verdicts are probabilistic: by default they only tighten the
