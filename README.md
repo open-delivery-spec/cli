@@ -350,7 +350,7 @@ gate in one entry — the same analysis CI runs, but before you push:
 # .pre-commit-config.yaml
 repos:
   - repo: https://github.com/open-delivery-spec/cli
-    rev: v0.6.0
+    rev: v0.7.1
     hooks:
       - id: ods-analyze          # blocks the commit on high/critical findings
 ```
