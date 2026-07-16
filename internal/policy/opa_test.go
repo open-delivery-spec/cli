@@ -368,6 +368,66 @@ func TestDefaultPolicyAIReviewRoutesNotDenies(t *testing.T) {
 	}
 }
 
+func TestDefaultPolicyUndisclosedAIWarns(t *testing.T) {
+	path := writeTempPolicy(t, DefaultRegoPolicy())
+
+	cases := []struct {
+		name     string
+		in       *EvalInput
+		wantWarn bool
+	}{
+		{
+			"suspected AI without disclosure warns",
+			&EvalInput{AIGenerated: true, AIConfidence: 0.6,
+				DetectionSources: []string{"branch-name", "diff-heuristics"}},
+			true,
+		},
+		{
+			"trailer disclosure silences the nudge",
+			&EvalInput{AIGenerated: true, AIConfidence: 0.9,
+				DetectionSources: []string{"commit-trailer", "branch-name"}},
+			false,
+		},
+		{
+			"pr-body disclosure silences the nudge",
+			&EvalInput{AIGenerated: true, AIConfidence: 0.8,
+				DetectionSources: []string{"pr-body"}},
+			false,
+		},
+		{
+			"git-ai notes count as disclosure",
+			&EvalInput{AIGenerated: true, AIConfidence: 0.9,
+				DetectionSources: []string{"git-ai-notes"}},
+			false,
+		},
+		{
+			"human code never nagged",
+			&EvalInput{AIGenerated: false},
+			false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := Evaluate(path, tc.in)
+			if err != nil {
+				t.Fatalf("evaluate: %v", err)
+			}
+			if !res.Allowed {
+				t.Errorf("disclosure nudge must never deny, got denials: %v", res.Denials)
+			}
+			got := false
+			for _, w := range res.Warnings {
+				if strings.Contains(w, "without author disclosure") {
+					got = true
+				}
+			}
+			if got != tc.wantWarn {
+				t.Errorf("disclosure warning = %v, want %v (warnings: %v)", got, tc.wantWarn, res.Warnings)
+			}
+		})
+	}
+}
+
 func TestDefaultPolicyAIReviewApproveIsNeutral(t *testing.T) {
 	path := writeTempPolicy(t, DefaultRegoPolicy())
 	in := &EvalInput{

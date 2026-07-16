@@ -574,6 +574,67 @@ func Load(b []byte) interface{} {
 // request_changes verdict routes the review tier to elevated without denying
 // (probabilistic opinions tighten, never block, unless a policy opts in), and
 // a verdict stamped for a different commit is skipped as stale.
+// TestPipeline_DisclosureNudge covers disclosure completeness end to end:
+// suspected AI without any author attribution draws a warning (the SFC and
+// kernel docs both put the disclosure duty on the author), a Co-Authored-By
+// trailer silences it, and the nudge never changes the exit code.
+func TestPipeline_DisclosureNudge(t *testing.T) {
+	runCheck := func(t *testing.T, dir, branch string) (allowed bool, warnings []string) {
+		t.Helper()
+		cmd := exec.Command(odsBin, "check", "--json")
+		cmd.Dir = dir
+		cmd.Env = append(hermeticEnv(), "ODS_BRANCH="+branch)
+		var stdout, stderr strings.Builder
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("check failed: %v\n%s", err, stderr.String())
+		}
+		var res struct {
+			Allowed  bool     `json:"allowed"`
+			Warnings []string `json:"warnings"`
+		}
+		mustJSON(t, stdout.String(), &res)
+		return res.Allowed, res.Warnings
+	}
+	hasNudge := func(warnings []string) bool {
+		for _, w := range warnings {
+			if strings.Contains(w, "without author disclosure") {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("undisclosed suspicion warns without blocking", func(t *testing.T) {
+		dir := initRepo(t)
+		writeFile(t, dir, "svc.go", "package svc\n\nfunc S() int { return 1 }\n")
+		git(t, dir, "add", ".")
+		git(t, dir, "commit", "-m", "feat: add svc") // no attribution anywhere
+		allowed, warnings := runCheck(t, dir, "copilot/add-svc")
+		if !allowed {
+			t.Errorf("disclosure nudge must never block, got allowed=false")
+		}
+		if !hasNudge(warnings) {
+			t.Errorf("expected an author-disclosure warning, got %v", warnings)
+		}
+	})
+
+	t.Run("trailer disclosure silences the nudge", func(t *testing.T) {
+		dir := initRepo(t)
+		writeFile(t, dir, "svc.go", "package svc\n\nfunc S() int { return 1 }\n")
+		git(t, dir, "add", ".")
+		git(t, dir, "commit", "-m", "feat: add svc\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
+		allowed, warnings := runCheck(t, dir, "claude/add-svc")
+		if !allowed {
+			t.Errorf("disclosed AI change must stay allowed")
+		}
+		if hasNudge(warnings) {
+			t.Errorf("disclosed change must not be nagged, got %v", warnings)
+		}
+	})
+}
+
 func TestPipeline_AIReviewVerdict(t *testing.T) {
 	dir := initRepo(t)
 	writeFile(t, dir, "svc.go", "package svc\n\nfunc S() int { return 1 }\n")
