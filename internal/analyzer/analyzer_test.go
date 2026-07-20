@@ -182,6 +182,74 @@ func TestCheckInconsistentPattern(t *testing.T) {
 	})
 }
 
+func TestCheckHallucinatedAPI(t *testing.T) {
+	t.Run("ioutil import flagged", func(t *testing.T) {
+		lines := []string{`import "io/ioutil"`}
+		issues := checkHallucinatedAPI("file.go", lines)
+		if len(issues) == 0 {
+			t.Fatal("expected hallucinated API issue for io/ioutil import, got none")
+		}
+		if issues[0].Rule != "ai-hallucinated-api" {
+			t.Errorf("rule = %s, want ai-hallucinated-api", issues[0].Rule)
+		}
+		if issues[0].Severity != "medium" {
+			t.Errorf("severity = %s, want medium", issues[0].Severity)
+		}
+	})
+
+	t.Run("ioutil.ReadAll call flagged", func(t *testing.T) {
+		lines := []string{"data, err := ioutil.ReadAll(r)"}
+		issues := checkHallucinatedAPI("file.go", lines)
+		if len(issues) == 0 {
+			t.Fatal("expected hallucinated API issue for ioutil.ReadAll, got none")
+		}
+		if issues[0].Severity != "medium" {
+			t.Errorf("severity = %s, want medium", issues[0].Severity)
+		}
+	})
+
+	t.Run("ioutil.ReadFile call flagged", func(t *testing.T) {
+		lines := []string{`data, err := ioutil.ReadFile("config.json")`}
+		issues := checkHallucinatedAPI("file.go", lines)
+		if len(issues) == 0 {
+			t.Fatal("expected hallucinated API issue for ioutil.ReadFile, got none")
+		}
+	})
+
+	t.Run("rand.Seed flagged as info", func(t *testing.T) {
+		lines := []string{"rand.Seed(time.Now().UnixNano())"}
+		issues := checkHallucinatedAPI("file.go", lines)
+		if len(issues) == 0 {
+			t.Fatal("expected hallucinated API issue for rand.Seed, got none")
+		}
+		if issues[0].Severity != "info" {
+			t.Errorf("severity = %s, want info", issues[0].Severity)
+		}
+	})
+
+	t.Run("modern io.ReadAll not flagged", func(t *testing.T) {
+		lines := []string{
+			"data, err := io.ReadAll(r)",
+			`data, err := os.ReadFile("config.json")`,
+		}
+		issues := checkHallucinatedAPI("file.go", lines)
+		if len(issues) > 0 {
+			t.Errorf("expected no issues for modern API usage, got %d", len(issues))
+		}
+	})
+
+	t.Run("comments not flagged", func(t *testing.T) {
+		lines := []string{
+			"// Use ioutil.ReadAll for reading — deprecated",
+			"// rand.Seed was used before Go 1.20",
+		}
+		issues := checkHallucinatedAPI("file.go", lines)
+		if len(issues) > 0 {
+			t.Errorf("expected no issues for comment lines, got %d", len(issues))
+		}
+	})
+}
+
 func TestAnalyzeAllRules(t *testing.T) {
 	t.Run("AI-like code triggers multiple rules", func(t *testing.T) {
 		files := map[string][]string{

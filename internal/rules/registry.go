@@ -14,6 +14,7 @@ const (
 	OverCommenting         = "ai-over-commenting"
 	UnsafeDeserialization  = "ai-unsafe-deserialization"
 	InconsistentPattern    = "ai-inconsistent-pattern"
+	HallucinatedAPI        = "ai-hallucinated-api"
 )
 
 // Rule describes a single analysis rule.
@@ -59,6 +60,14 @@ var registry = []Rule{
 		DefaultSeverity: "medium",
 		Category:        "ai-pattern",
 		Suggestion:      "Standardize on one naming convention and indentation style; run gofmt/prettier.",
+	},
+	{
+		ID:              HallucinatedAPI,
+		Name:            "Hallucinated or deprecated API",
+		Description:     "Use of deprecated Go standard library APIs that AI commonly generates from older training data: io/ioutil (deprecated Go 1.16) and rand.Seed (deprecated Go 1.20).",
+		DefaultSeverity: "medium",
+		Category:        "ai-pattern",
+		Suggestion:      "Replace io/ioutil with io and os equivalents (io.ReadAll, os.ReadFile, os.WriteFile, io.NopCloser). Remove rand.Seed — the global source is automatically seeded since Go 1.20.",
 	},
 }
 

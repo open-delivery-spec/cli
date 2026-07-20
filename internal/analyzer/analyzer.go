@@ -75,6 +75,7 @@ func Analyze(opts Options) *AnalysisResult {
 		result.Issues = append(result.Issues, checkOverCommenting(path, lines)...)
 		result.Issues = append(result.Issues, checkUnsafeDeserialization(path, lines)...)
 		result.Issues = append(result.Issues, checkInconsistentPattern(path, lines)...)
+		result.Issues = append(result.Issues, checkHallucinatedAPI(path, lines)...)
 	}
 
 	// Re-number lines for issues in merged files
@@ -344,6 +345,65 @@ func checkInconsistentPattern(file string, lines []string) []Issue {
 				Severity:   "low",
 				Message:    fmt.Sprintf("Mixed indentation: %d tab-indented + %d space-indented lines — AI can mix styles", tabCount, spaceCount),
 				Suggestion: "Standardize on one indentation style. Use gofmt for Go, prettier for JS/TS.",
+			})
+		}
+	}
+
+	return issues
+}
+
+// ── Rule: ai-hallucinated-api ───────────────────────────────────
+//
+// Detects use of deprecated Go standard library APIs that AI commonly
+// generates from older training data. The two main signals are:
+//   - io/ioutil (deprecated in Go 1.16; replaced by io and os equivalents)
+//   - rand.Seed (deprecated in Go 1.20; global source is auto-seeded)
+
+var (
+	ioutilImportPattern = regexp.MustCompile(`"io/ioutil"`)
+	ioutilCallPattern   = regexp.MustCompile(`\bioutil\.(ReadFile|WriteFile|ReadAll|NopCloser|Discard|TempFile|TempDir|ReadDir)\b`)
+	randSeedPattern     = regexp.MustCompile(`\brand\.Seed\(`)
+)
+
+func checkHallucinatedAPI(file string, lines []string) []Issue {
+	var issues []Issue
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+
+		if ioutilImportPattern.MatchString(trimmed) {
+			issues = append(issues, Issue{
+				Rule:       rules.HallucinatedAPI,
+				File:       file,
+				Line:       i + 1,
+				Severity:   "medium",
+				Message:    `import "io/ioutil" is deprecated since Go 1.16 — AI commonly generates code using older APIs`,
+				Suggestion: "Replace with io.ReadAll, io.NopCloser, os.ReadFile, os.WriteFile, etc.",
+			})
+		}
+
+		if m := ioutilCallPattern.FindStringSubmatch(trimmed); m != nil {
+			issues = append(issues, Issue{
+				Rule:       rules.HallucinatedAPI,
+				File:       file,
+				Line:       i + 1,
+				Severity:   "medium",
+				Message:    fmt.Sprintf("ioutil.%s is deprecated since Go 1.16 — AI commonly uses the old ioutil package", m[1]),
+				Suggestion: "Replace ioutil.ReadAll with io.ReadAll; ioutil.ReadFile/WriteFile with os.ReadFile/os.WriteFile; ioutil.NopCloser with io.NopCloser.",
+			})
+		}
+
+		if randSeedPattern.MatchString(trimmed) {
+			issues = append(issues, Issue{
+				Rule:       rules.HallucinatedAPI,
+				File:       file,
+				Line:       i + 1,
+				Severity:   "info",
+				Message:    "rand.Seed is deprecated since Go 1.20 — the global source is automatically seeded",
+				Suggestion: "Remove the rand.Seed call; the global rand source seeds itself automatically since Go 1.20.",
 			})
 		}
 	}

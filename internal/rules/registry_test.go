@@ -61,6 +61,7 @@ func TestConstantsAreRegistered(t *testing.T) {
 		OverCommenting,
 		UnsafeDeserialization,
 		InconsistentPattern,
+		HallucinatedAPI,
 	}
 	for _, id := range consts {
 		if _, ok := Get(id); !ok {
