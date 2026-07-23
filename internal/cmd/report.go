@@ -3,6 +3,8 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"time"
 
 	"github.com/open-delivery-spec/cli/internal/logx"
 	"github.com/open-delivery-spec/cli/internal/report"
@@ -12,6 +14,7 @@ import (
 var (
 	reportSince   string
 	reportJSON    bool
+	reportHTML    string
 	reportMaxCmts int
 )
 
@@ -29,7 +32,8 @@ breakdown over a window.
 Examples:
   ods report                          # last 90 days
   ods report --since "30 days ago"    # custom window
-  ods report --json                   # machine-readable`,
+  ods report --json                   # machine-readable
+  ods report --html ai-report.html    # shareable dashboard`,
 	RunE: runReport,
 }
 
@@ -40,6 +44,8 @@ func init() {
 	reportCmd.Flags().IntVar(&reportMaxCmts, "max-commits", 0,
 		"cap the number of commits scanned (0 = no cap)")
 	reportCmd.Flags().BoolVar(&reportJSON, "json", false, "output as JSON")
+	reportCmd.Flags().StringVar(&reportHTML, "html", "",
+		"write a shareable HTML dashboard to this path (use - for stdout)")
 }
 
 func runReport(cmd *cobra.Command, args []string) error {
@@ -57,6 +63,19 @@ func runReport(cmd *cobra.Command, args []string) error {
 		}
 		cmd.OutOrStdout().Write(data)
 		cmd.OutOrStdout().Write([]byte("\n"))
+		return nil
+	}
+
+	if reportHTML != "" {
+		doc := report.RenderHTML(*r, time.Now())
+		if reportHTML == "-" {
+			cmd.OutOrStdout().Write([]byte(doc))
+			return nil
+		}
+		if err := os.WriteFile(reportHTML, []byte(doc), 0o644); err != nil {
+			return fmt.Errorf("writing HTML report to %s: %w", reportHTML, err)
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Wrote AI attribution dashboard to %s\n", reportHTML)
 		return nil
 	}
 
