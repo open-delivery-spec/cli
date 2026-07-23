@@ -413,11 +413,21 @@ ODS AI Attribution Report — since 90 days ago
 64 commit(s): 5 AI-assisted (8%), 59 human — AI touched 6% of changed lines
 ```
 
+Add `--html ai-report.html` to get a **shareable dashboard** instead — hero
+metrics, an "AI share over time" trend chart, and a per-tool breakdown, all in
+one self-contained file (no external assets, opens offline, screenshots
+cleanly):
+
+```bash
+ods report --since "1 year ago" --html ai-report.html
+```
+
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--since` | `90 days ago` | History window (any git `--since` expression) |
 | `--max-commits` | `0` | Cap commits scanned (0 = no cap) |
 | `--json` | `false` | Machine-readable output (commit/line shares, per-tool counts) |
+| `--html` | — | Write a self-contained HTML dashboard to this path (`-` for stdout) |
 
 This is attribution, not forensic detection: it counts what the tools disclose.
 Coverage/quality history is not reconstructable from git alone, so the report

@@ -1,6 +1,95 @@
 package report
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"time"
+)
+
+func mustTime(s string) time.Time {
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		panic(err)
+	}
+	return t
+}
+
+func TestBuildBuckets_weekly(t *testing.T) {
+	commits := []Commit{
+		{Hash: "a", AITool: "Claude", Date: mustTime("2026-07-06")}, // W28 (Mon)
+		{Hash: "b", AITool: "", Date: mustTime("2026-07-08")},       // W28, human
+		{Hash: "c", AITool: "Cursor", Date: mustTime("2026-07-14")}, // W29
+	}
+	r := Aggregate(commits, "30 days ago")
+	if len(r.Buckets) != 2 {
+		t.Fatalf("buckets = %d, want 2 (%+v)", len(r.Buckets), r.Buckets)
+	}
+	// Chronological order.
+	if r.Buckets[0].Start > r.Buckets[1].Start {
+		t.Errorf("buckets not sorted: %+v", r.Buckets)
+	}
+	w28 := r.Buckets[0]
+	if w28.TotalCommits != 2 || w28.AICommits != 1 || w28.AIShare < 0.49 || w28.AIShare > 0.51 {
+		t.Errorf("W28 = %+v, want 2 commits / 1 AI / ~0.5 share", w28)
+	}
+}
+
+func TestBuildBuckets_skipsUndatedCommits(t *testing.T) {
+	// The other Aggregate tests use undated commits — those must yield no buckets,
+	// never a panic or a zero-time slice.
+	r := Aggregate([]Commit{{AITool: "Claude"}, {AITool: ""}}, "x")
+	if len(r.Buckets) != 0 {
+		t.Errorf("undated commits should produce no buckets, got %+v", r.Buckets)
+	}
+}
+
+func TestBuildBuckets_monthlyForLongSpan(t *testing.T) {
+	commits := []Commit{
+		{Hash: "a", AITool: "Claude", Date: mustTime("2026-01-15")},
+		{Hash: "b", AITool: "", Date: mustTime("2026-08-20")}, // > 26 weeks later
+	}
+	r := Aggregate(commits, "1 year ago")
+	for _, bk := range r.Buckets {
+		if strings.Contains(bk.Label, "-W") {
+			t.Errorf("long span should bucket monthly, got weekly label %q", bk.Label)
+		}
+	}
+	if len(r.Buckets) != 2 {
+		t.Errorf("monthly buckets = %d, want 2 (%+v)", len(r.Buckets), r.Buckets)
+	}
+}
+
+func TestRenderHTML_containsHeadlineNumbers(t *testing.T) {
+	commits := []Commit{
+		{Hash: "a", AITool: "Claude", Insertions: 100, Date: mustTime("2026-07-06")},
+		{Hash: "b", AITool: "", Insertions: 100, Date: mustTime("2026-07-08")},
+	}
+	r := Aggregate(commits, "30 days ago")
+	doc := RenderHTML(r, mustTime("2026-07-16"))
+	for _, want := range []string{"<!DOCTYPE html>", "AI Attribution Report", "50%", "<svg", "Claude", "</html>"} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("HTML missing %q", want)
+		}
+	}
+}
+
+func TestRenderHTML_emptyWindow(t *testing.T) {
+	doc := RenderHTML(Aggregate(nil, "30 days ago"), time.Now())
+	if !strings.Contains(doc, "No commits in the selected window") {
+		t.Error("empty report should say so")
+	}
+	if strings.Contains(doc, "<svg") {
+		t.Error("empty report should not draw a chart")
+	}
+}
+
+func TestRenderHTML_escapesToolName(t *testing.T) {
+	commits := []Commit{{Hash: "a", AITool: "<script>x</script>", Date: mustTime("2026-07-06")}}
+	doc := RenderHTML(Aggregate(commits, "x"), time.Now())
+	if strings.Contains(doc, "<script>x</script>") {
+		t.Error("tool name must be HTML-escaped")
+	}
+}
 
 func TestAggregate(t *testing.T) {
 	commits := []Commit{

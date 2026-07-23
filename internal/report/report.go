@@ -52,6 +52,19 @@ type Report struct {
 	AILineShare       float64        `json:"ai_line_share"` // 0..1
 	ByTool            map[string]int `json:"by_tool"`       // tool -> commit count
 	Summary           string         `json:"summary"`
+	// Buckets is a chronological time series (weekly, or monthly for long
+	// windows) of AI vs human activity — the "trending which way" view. Empty
+	// when commits carry no dates.
+	Buckets []TimeBucket `json:"buckets,omitempty"`
+}
+
+// TimeBucket aggregates one time slice of history for the trend view.
+type TimeBucket struct {
+	Label        string  `json:"label"` // e.g. "2026-W28" or "2026-07"
+	Start        string  `json:"start"` // ISO date of the slice start
+	TotalCommits int     `json:"total_commits"`
+	AICommits    int     `json:"ai_commits"`
+	AIShare      float64 `json:"ai_share"` // 0..1 of commits in this slice
 }
 
 // Options configures history collection.
@@ -194,7 +207,67 @@ func Aggregate(commits []Commit, since string) Report {
 		r.AILineShare = float64(r.AIChangedLines) / float64(r.TotalChangedLines)
 	}
 	r.Summary = summarize(r)
+	r.Buckets = buildBuckets(commits)
 	return r
+}
+
+// buildBuckets groups dated commits into a chronological trend. Commits with a
+// zero date are skipped (git always provides dates; test fixtures may not).
+// Granularity is weekly, or monthly when the span exceeds ~26 weeks, so a
+// year-long window stays readable.
+func buildBuckets(commits []Commit) []TimeBucket {
+	var dated []Commit
+	var min, max time.Time
+	for _, c := range commits {
+		if c.Date.IsZero() {
+			continue
+		}
+		dated = append(dated, c)
+		if min.IsZero() || c.Date.Before(min) {
+			min = c.Date
+		}
+		if c.Date.After(max) {
+			max = c.Date
+		}
+	}
+	if len(dated) == 0 {
+		return nil
+	}
+
+	monthly := max.Sub(min) > 26*7*24*time.Hour
+	key := func(t time.Time) (label, start string) {
+		if monthly {
+			return t.Format("2006-01"), t.Format("2006-01") + "-01"
+		}
+		// ISO week label; slice start is the Monday of that week.
+		y, w := t.ISOWeek()
+		weekday := (int(t.Weekday()) + 6) % 7 // Monday=0
+		monday := t.AddDate(0, 0, -weekday)
+		return fmt.Sprintf("%d-W%02d", y, w), monday.Format("2006-01-02")
+	}
+
+	idx := map[string]int{}
+	var out []TimeBucket
+	for _, c := range dated {
+		label, start := key(c.Date)
+		i, ok := idx[label]
+		if !ok {
+			i = len(out)
+			idx[label] = i
+			out = append(out, TimeBucket{Label: label, Start: start})
+		}
+		out[i].TotalCommits++
+		if c.IsAI() {
+			out[i].AICommits++
+		}
+	}
+	for i := range out {
+		if out[i].TotalCommits > 0 {
+			out[i].AIShare = float64(out[i].AICommits) / float64(out[i].TotalCommits)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Start < out[j].Start })
+	return out
 }
 
 func summarize(r Report) string {
