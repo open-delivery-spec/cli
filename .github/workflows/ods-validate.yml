@@ -11,6 +11,12 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    env:
+      # Dogfooding installs the CLI at a fresh commit SHA; sum.golang.org
+      # intermittently 500s while verifying an unreleased pseudo-version.
+      # Skip checksum-DB verification here — this is our own just-built
+      # code, and adopters pinned to a released tag are unaffected.
+      GOSUMDB: "off"
     steps:
       - uses: actions/checkout@v7
         with:
