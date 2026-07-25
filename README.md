@@ -1,6 +1,6 @@
 # ODS CLI
 
-> **Zero-config AI code quality gate for teams using Claude Code, Copilot, or Cursor.** These tools already stamp `Co-Authored-By` trailers on every commit, so ODS attributes AI-generated code automatically in CI — then analyzes quality, scores technical debt, and enforces policy on every PR. No disclosure forms, no manual tagging.
+> **Zero-config governance and visibility for AI-assisted code — on every pull request.** Claude Code, Copilot, and Cursor already stamp `Co-Authored-By` trailers on every commit, so ODS shows how much of your delivery is AI-assisted, routes review attention to the changes that need it, and enforces your policy in CI — no disclosure forms, no manual tagging. It governs the AI you can see; it's a signal producer, not a quality oracle.
 
 [![CI](https://github.com/open-delivery-spec/cli/actions/workflows/ci.yml/badge.svg)](https://github.com/open-delivery-spec/cli/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)](https://go.dev)
@@ -23,7 +23,7 @@ This is the new reality of AI-assisted development. AI code increases technical 
 | **Invisible AI code** | Teams can’t distinguish AI-generated from human-written changes |
 | **Scope drift** | AI changes files unrelated to the stated feature |
 
-**ODS is the CI gate that detects AI code, analyzes its quality, scores technical debt impact, and enforces enterprise policy — on every pull request.**
+**ODS is the CI layer that attributes AI-assisted code, surfaces how much of your delivery it is, routes review attention to the risky changes, and enforces your policy — on every pull request.**
 
 ---
 
