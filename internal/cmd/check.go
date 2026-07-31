@@ -306,7 +306,14 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 	switch {
 	case checkJSON:
-		data, err := json.MarshalIndent(result, "", "  ")
+		// Echo the deterministic merge-confidence facts the gate saw alongside
+		// the result, so reports and auditors can render them without re-running
+		// the pipeline. Embeds EvalResult so its fields stay top-level.
+		out := struct {
+			*policy.EvalResult
+			MergeConfidence *policy.EvalMergeConfidence `json:"merge_confidence,omitempty"`
+		}{EvalResult: result, MergeConfidence: evalInput.MergeConfidence}
+		data, err := json.MarshalIndent(out, "", "  ")
 		if err != nil {
 			return err
 		}
