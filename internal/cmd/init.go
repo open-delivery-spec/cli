@@ -99,6 +99,8 @@ review_tier := "auto" {
     not has_high_or_critical
     not ai_review_requests_changes
     not ai_undisclosed
+    not ai_undertested
+    not ai_touches_risky_path
 }
 
 review_tier := "elevated" {
@@ -120,6 +122,39 @@ review_tier := "elevated" {
 
 ai_review_requests_changes {
     input.ai_reviews[_].verdict == "request_changes"
+}
+
+# --- Merge-confidence (deterministic diff facts) ---
+# Facts derived from the diff alone: was source added without tests, does the
+# change touch sensitive paths (CI config, dependency manifests, auth/crypto).
+# They warn always, and route AI-authored changes to elevated. Deny stays
+# opt-in — add your own deny over input.merge_confidence to enforce.
+warn[msg] {
+    input.merge_confidence.added_source_without_tests
+    msg = "Source code changed but no tests were added or updated"
+}
+
+warn[msg] {
+    p := input.merge_confidence.risky_paths[_]
+    msg = sprintf("Change touches a sensitive path (%s) — extra review recommended", [p])
+}
+
+ai_undertested {
+    input.ai_generated == true
+    input.merge_confidence.added_source_without_tests
+}
+
+ai_touches_risky_path {
+    input.ai_generated == true
+    input.merge_confidence.risky_paths[_]
+}
+
+review_tier := "elevated" {
+    ai_undertested
+}
+
+review_tier := "elevated" {
+    ai_touches_risky_path
 }
 
 has_high_or_critical {

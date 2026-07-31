@@ -635,6 +635,70 @@ func TestPipeline_DisclosureNudge(t *testing.T) {
 	})
 }
 
+// TestPipeline_MergeConfidence covers the deterministic merge-confidence
+// signals end to end: an AI-authored change that adds source without tests
+// warns and routes to elevated (attribution raises the bar), it never denies,
+// and adding a test clears the signal.
+func TestPipeline_MergeConfidence(t *testing.T) {
+	runCheck := func(t *testing.T, dir string) (allowed bool, tier string, warnings []string) {
+		t.Helper()
+		out, _, exit := runODSStreams(t, dir, "check", "--json")
+		if exit != 0 {
+			t.Fatalf("check exit = %d, want 0 (merge-confidence must not deny)\n%s", exit, out)
+		}
+		var res struct {
+			Allowed    bool     `json:"allowed"`
+			ReviewTier string   `json:"review_tier"`
+			Warnings   []string `json:"warnings"`
+		}
+		mustJSON(t, out, &res)
+		return res.Allowed, res.ReviewTier, res.Warnings
+	}
+	hasNoTestsWarn := func(warnings []string) bool {
+		for _, w := range warnings {
+			if strings.Contains(w, "no tests were added") {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("AI source without tests warns and elevates", func(t *testing.T) {
+		dir := initRepo(t)
+		writeFile(t, dir, "svc.go", "package svc\n\nfunc Add(a, b int) int { return a + b }\n")
+		git(t, dir, "add", ".")
+		git(t, dir, "commit", "-m", "feat: add svc\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
+		allowed, tier, warnings := runCheck(t, dir)
+		if !allowed {
+			t.Error("merge-confidence must never deny by default")
+		}
+		if tier != "elevated" {
+			t.Errorf("review_tier = %q, want elevated (AI source without tests)", tier)
+		}
+		if !hasNoTestsWarn(warnings) {
+			t.Errorf("expected a no-tests warning, got %v", warnings)
+		}
+	})
+
+	t.Run("adding a test clears the signal", func(t *testing.T) {
+		dir := initRepo(t)
+		writeFile(t, dir, "svc.go", "package svc\n\nfunc Add(a, b int) int { return a + b }\n")
+		writeFile(t, dir, "svc_test.go", "package svc\n\nimport \"testing\"\n\nfunc TestAdd(t *testing.T) {\n\tif Add(1, 2) != 3 {\n\t\tt.Fail()\n\t}\n}\n")
+		git(t, dir, "add", ".")
+		git(t, dir, "commit", "-m", "feat: add svc with tests\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
+		allowed, tier, warnings := runCheck(t, dir)
+		if !allowed {
+			t.Error("tested change must stay allowed")
+		}
+		if tier == "elevated" {
+			t.Errorf("tested change must not route elevated on the no-tests signal, got %q", tier)
+		}
+		if hasNoTestsWarn(warnings) {
+			t.Errorf("tested change must not draw the no-tests warning, got %v", warnings)
+		}
+	})
+}
+
 func TestPipeline_AIReviewVerdict(t *testing.T) {
 	dir := initRepo(t)
 	writeFile(t, dir, "svc.go", "package svc\n\nfunc S() int { return 1 }\n")

@@ -254,6 +254,44 @@ Undisclosed AI costs review attention, never a merge — and adding a
 `Co-Authored-By`/`Assisted-by` trailer or a PR-body disclosure silences the
 nudge.
 
+#### Merge-confidence signals: `input.merge_confidence`
+
+Static analysis tells you what's *wrong*; these tell you whether the change is
+**shaped like real work** — deterministic facts derived from the diff alone, no
+LLM, no stylometric guessing. The policy input carries `merge_confidence`:
+
+| Field | Meaning |
+|-------|---------|
+| `added_source_without_tests` | Source code was added but no test file was added or updated (the most-cited "AI PR" smell) |
+| `tests_touched` | Any test file was added or modified |
+| `risky_paths` | Changed files on sensitive paths — CI config (`.github/workflows/`), dependency manifests/lockfiles, `auth`/`crypto`/`security` paths |
+| `files_changed` / `net_added_lines` / `source_files_changed` / `test_files_changed` | Diff shape, for wide-but-shallow detection |
+
+They are **facts, not opinions**: advisory by default (they route review
+attention), and attribution is used to *raise the bar* — an AI-authored change
+that adds source without tests, or touches a sensitive path, routes to
+`elevated`. Deny stays opt-in:
+
+```rego
+# Default policy: warn + route AI changes; your policy can make it block.
+warn[msg] {
+    input.merge_confidence.added_source_without_tests
+    msg = "Source code changed but no tests were added or updated"
+}
+
+# Opt in to enforce (deterministic, so it may deny):
+deny[msg] {
+    input.ai_generated
+    input.merge_confidence.added_source_without_tests
+    msg = "AI-authored change adds source without tests"
+}
+```
+
+This is the achievable form of "is this PR safe to merge?": ODS proves the
+change is tested, scanned, and shaped like real work — it does not judge whether
+the code is *correct* (that needs a human or an AI reviewer). It reduces how
+often a human has to reach that question.
+
 #### AI reviewer verdicts: `--ai-review`
 
 Static analysis covers known defect patterns; AI code reviewers (Copilot code

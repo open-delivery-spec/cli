@@ -428,6 +428,72 @@ func TestDefaultPolicyUndisclosedAIWarns(t *testing.T) {
 	}
 }
 
+func TestDefaultPolicyMergeConfidence(t *testing.T) {
+	path := writeTempPolicy(t, DefaultRegoPolicy())
+
+	cases := []struct {
+		name     string
+		in       *EvalInput
+		wantWarn string // substring expected in warnings ("" = none of ours)
+		wantTier string // "" = no tier assigned by the default policy
+	}{
+		{
+			"AI source without tests warns and elevates",
+			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"},
+				MergeConfidence: &EvalMergeConfidence{AddedSourceWithoutTests: true, SourceFilesChanged: 1}},
+			"no tests", ReviewTierElevated,
+		},
+		{
+			"human source without tests warns but does not elevate",
+			&EvalInput{AIGenerated: false,
+				MergeConfidence: &EvalMergeConfidence{AddedSourceWithoutTests: true}},
+			"no tests", "",
+		},
+		{
+			"AI change touching a risky path warns and elevates",
+			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"},
+				MergeConfidence: &EvalMergeConfidence{RiskyPaths: []string{".github/workflows/ci.yml"}}},
+			"sensitive path", ReviewTierElevated,
+		},
+		{
+			"tested AI change is neutral",
+			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"},
+				MergeConfidence: &EvalMergeConfidence{TestsTouched: true, SourceFilesChanged: 1, TestFilesChanged: 1}},
+			"", "",
+		},
+		{
+			"absent merge_confidence is safe",
+			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}},
+			"", "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := Evaluate(path, tc.in)
+			if err != nil {
+				t.Fatalf("evaluate: %v", err)
+			}
+			if !res.Allowed {
+				t.Errorf("merge-confidence signals must never deny by default, got: %v", res.Denials)
+			}
+			if res.ReviewTier != tc.wantTier {
+				t.Errorf("review_tier = %q, want %q (warnings: %v)", res.ReviewTier, tc.wantTier, res.Warnings)
+			}
+			if tc.wantWarn != "" {
+				found := false
+				for _, w := range res.Warnings {
+					if strings.Contains(w, tc.wantWarn) {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("expected a warning containing %q, got %v", tc.wantWarn, res.Warnings)
+				}
+			}
+		})
+	}
+}
+
 func TestDefaultPolicyAIReviewApproveIsNeutral(t *testing.T) {
 	path := writeTempPolicy(t, DefaultRegoPolicy())
 	in := &EvalInput{
