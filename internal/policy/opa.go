@@ -62,6 +62,24 @@ type EvalInput struct {
 	// probabilistic opinions default to routing attention only. Policies that
 	// want LLM findings to block must opt in explicitly over this section.
 	AIReviews []EvalAIReview `json:"ai_reviews,omitempty"`
+	// MergeConfidence carries deterministic, diff-scoped facts about the change
+	// (is it tested, how is it shaped, does it touch sensitive paths). These are
+	// facts, not opinions — advisory by default (they route review attention),
+	// and a policy may opt in to deny on them. Attribution (ai_generated) is
+	// used to raise the bar, never these signals to detect AI.
+	MergeConfidence *EvalMergeConfidence `json:"merge_confidence,omitempty"`
+}
+
+// EvalMergeConfidence mirrors the deterministic merge-confidence signals
+// (package internal/mergeconf) as policy input under input.merge_confidence.
+type EvalMergeConfidence struct {
+	FilesChanged            int      `json:"files_changed"`
+	SourceFilesChanged      int      `json:"source_files_changed"`
+	TestFilesChanged        int      `json:"test_files_changed"`
+	NetAddedLines           int      `json:"net_added_lines"`
+	TestsTouched            bool     `json:"tests_touched"`
+	AddedSourceWithoutTests bool     `json:"added_source_without_tests"`
+	RiskyPaths              []string `json:"risky_paths,omitempty"`
 }
 
 // EvalAIReview is one AI reviewer's verdict in the policy input.
@@ -303,6 +321,30 @@ warn[msg] {
     rev := input.ai_reviews[_]
     rev.verdict == "request_changes"
     msg = sprintf("AI reviewer %s requested changes (%d finding(s)) — extra review routed", [rev.tool, count(rev.findings)])
+}
+
+# Merge-confidence: deterministic, diff-scoped facts (is it tested, does it
+# touch sensitive paths). They route review attention; AI-authored changes get
+# a higher bar. Deny stays opt-in — write your own deny over
+# input.merge_confidence to enforce.
+warn[msg] {
+    input.merge_confidence.added_source_without_tests
+    msg = "Source code changed but no tests were added or updated"
+}
+
+warn[msg] {
+    p := input.merge_confidence.risky_paths[_]
+    msg = sprintf("Change touches a sensitive path (%s) — extra review recommended", [p])
+}
+
+review_tier := "elevated" {
+    input.ai_generated
+    input.merge_confidence.added_source_without_tests
+}
+
+review_tier := "elevated" {
+    input.ai_generated
+    input.merge_confidence.risky_paths[_]
 }
 `
 }

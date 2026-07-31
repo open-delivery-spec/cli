@@ -11,6 +11,7 @@ import (
 	"github.com/open-delivery-spec/cli/internal/coverage"
 	"github.com/open-delivery-spec/cli/internal/detector"
 	"github.com/open-delivery-spec/cli/internal/logx"
+	"github.com/open-delivery-spec/cli/internal/mergeconf"
 	"github.com/open-delivery-spec/cli/internal/policy"
 	"github.com/open-delivery-spec/cli/internal/review"
 	"github.com/open-delivery-spec/cli/internal/sarif"
@@ -191,6 +192,17 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Deterministic merge-confidence signals from the diff (tested? shaped like
+	// real work? touches sensitive paths?). Reuses the per-code-file added-line
+	// counts already computed for the analyzer.
+	addedByCodeFile := make(map[string]int, len(diffFiles))
+	for f, lines := range diffFiles {
+		addedByCodeFile[f] = len(lines)
+	}
+	mc := mergeconf.Compute(changedFiles, addedByCodeFile)
+	logx.Debugf("check: merge-confidence tests_touched=%t added_source_without_tests=%t risky_paths=%d files=%d",
+		mc.TestsTouched, mc.AddedSourceWithoutTests, len(mc.RiskyPaths), mc.FilesChanged)
+
 	// Build policy input
 	evalInput := &policy.EvalInput{
 		AIGenerated:        detectResult.AIGenerated,
@@ -201,6 +213,15 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		TestCoverageSource: scoreResult.Breakdown.TestCoverageSource,
 		Branch:             detectOpts.BranchName,
 		ChangedFiles:       changedFiles,
+		MergeConfidence: &policy.EvalMergeConfidence{
+			FilesChanged:            mc.FilesChanged,
+			SourceFilesChanged:      mc.SourceFilesChanged,
+			TestFilesChanged:        mc.TestFilesChanged,
+			NetAddedLines:           mc.NetAddedLines,
+			TestsTouched:            mc.TestsTouched,
+			AddedSourceWithoutTests: mc.AddedSourceWithoutTests,
+			RiskyPaths:              mc.RiskyPaths,
+		},
 		// _ods_detect_error is not set here — it's added by validate-action when
 		// the detect stage fails, not by the CLI's check command.
 	}
@@ -285,7 +306,14 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 	switch {
 	case checkJSON:
-		data, err := json.MarshalIndent(result, "", "  ")
+		// Echo the deterministic merge-confidence facts the gate saw alongside
+		// the result, so reports and auditors can render them without re-running
+		// the pipeline. Embeds EvalResult so its fields stay top-level.
+		out := struct {
+			*policy.EvalResult
+			MergeConfidence *policy.EvalMergeConfidence `json:"merge_confidence,omitempty"`
+		}{EvalResult: result, MergeConfidence: evalInput.MergeConfidence}
+		data, err := json.MarshalIndent(out, "", "  ")
 		if err != nil {
 			return err
 		}

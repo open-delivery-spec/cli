@@ -567,6 +567,32 @@ func TestScaffoldPolicyReviewTier(t *testing.T) {
 			AIConfidence:       0.35, // branch prefix alone — warns, but does not re-route
 			DetectionSources:   []string{"branch-name"},
 		}, "auto"},
+		{"disclosed AI adding source without tests routes elevated", &policy.EvalInput{
+			TechnicalDebtDelta: 0.5, // auto conditions otherwise hold — elevated must win without conflict
+			AIGenerated:        true,
+			AIConfidence:       0.9,
+			DetectionSources:   []string{"commit-trailer"},
+			MergeConfidence:    &policy.EvalMergeConfidence{AddedSourceWithoutTests: true, SourceFilesChanged: 1},
+		}, "elevated"},
+		{"disclosed AI touching a risky path routes elevated", &policy.EvalInput{
+			TechnicalDebtDelta: 0.5,
+			AIGenerated:        true,
+			AIConfidence:       0.9,
+			DetectionSources:   []string{"commit-trailer"},
+			MergeConfidence:    &policy.EvalMergeConfidence{RiskyPaths: []string{"go.mod"}},
+		}, "elevated"},
+		{"human adding source without tests keeps auto (attribution raises the bar, not the fact alone)", &policy.EvalInput{
+			TechnicalDebtDelta: 0.5,
+			AIGenerated:        false,
+			MergeConfidence:    &policy.EvalMergeConfidence{AddedSourceWithoutTests: true, SourceFilesChanged: 1},
+		}, "auto"},
+		{"AI change with tests keeps auto", &policy.EvalInput{
+			TechnicalDebtDelta: 0.5,
+			AIGenerated:        true,
+			AIConfidence:       0.9,
+			DetectionSources:   []string{"commit-trailer"},
+			MergeConfidence:    &policy.EvalMergeConfidence{TestsTouched: true, SourceFilesChanged: 1, TestFilesChanged: 1},
+		}, "auto"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
