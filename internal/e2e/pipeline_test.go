@@ -699,6 +699,80 @@ func TestPipeline_MergeConfidence(t *testing.T) {
 	})
 }
 
+// TestPipeline_PatchCoverage covers diff-scoped patch coverage end to end: an
+// AI-authored change whose added lines are only partly covered by a Go
+// coverage.out warns and routes to elevated (never denies); when the same added
+// lines are fully covered, the signal clears. A test file is added in both cases
+// so the no-tests signal is not what drives the routing — patch coverage is.
+func TestPipeline_PatchCoverage(t *testing.T) {
+	const svc = "package svc\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n\nfunc Sub(a, b int) int {\n\treturn a - b\n}\n"
+	const svcTest = "package svc\n\nimport \"testing\"\n\nfunc TestAdd(t *testing.T) {\n\tif Add(1, 2) != 3 {\n\t\tt.Fail()\n\t}\n}\n"
+
+	runCheck := func(t *testing.T, dir string) (allowed bool, tier string, warnings []string) {
+		t.Helper()
+		out, _, exit := runODSStreams(t, dir, "check", "--json")
+		if exit != 0 {
+			t.Fatalf("check exit = %d, want 0 (patch coverage must not deny)\n%s", exit, out)
+		}
+		var res struct {
+			Allowed       bool     `json:"allowed"`
+			ReviewTier    string   `json:"review_tier"`
+			Warnings      []string `json:"warnings"`
+			PatchCoverage float64  `json:"patch_coverage"`
+		}
+		mustJSON(t, out, &res)
+		return res.Allowed, res.ReviewTier, res.Warnings
+	}
+	hasPatchWarn := func(warnings []string) bool {
+		for _, w := range warnings {
+			if strings.Contains(w, "added lines are covered") {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("partly covered AI diff warns and elevates", func(t *testing.T) {
+		dir := initRepo(t)
+		writeFile(t, dir, "svc.go", svc)
+		writeFile(t, dir, "svc_test.go", svcTest)
+		git(t, dir, "add", ".")
+		git(t, dir, "commit", "-m", "feat: add svc\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
+		// Add covered (lines 3-5), Sub uncovered (lines 7-9): 3/6 added lines → 50%.
+		writeFile(t, dir, "coverage.out", "mode: set\nexample.com/m/svc.go:3.24,5.2 1 1\nexample.com/m/svc.go:7.24,9.2 1 0\n")
+		allowed, tier, warnings := runCheck(t, dir)
+		if !allowed {
+			t.Error("patch coverage must never deny by default")
+		}
+		if tier != "elevated" {
+			t.Errorf("review_tier = %q, want elevated (AI diff with low patch coverage)", tier)
+		}
+		if !hasPatchWarn(warnings) {
+			t.Errorf("expected a patch-coverage warning, got %v", warnings)
+		}
+	})
+
+	t.Run("fully covered AI diff clears the signal", func(t *testing.T) {
+		dir := initRepo(t)
+		writeFile(t, dir, "svc.go", svc)
+		writeFile(t, dir, "svc_test.go", svcTest)
+		git(t, dir, "add", ".")
+		git(t, dir, "commit", "-m", "feat: add svc\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
+		// Both Add (3-5) and Sub (7-9) covered: 6/6 added lines → 100%.
+		writeFile(t, dir, "coverage.out", "mode: set\nexample.com/m/svc.go:3.24,5.2 1 1\nexample.com/m/svc.go:7.24,9.2 1 1\n")
+		allowed, tier, warnings := runCheck(t, dir)
+		if !allowed {
+			t.Error("fully covered change must stay allowed")
+		}
+		if tier == "elevated" {
+			t.Errorf("fully covered change must not route elevated on patch coverage, got %q", tier)
+		}
+		if hasPatchWarn(warnings) {
+			t.Errorf("fully covered change must not draw the patch-coverage warning, got %v", warnings)
+		}
+	})
+}
+
 func TestPipeline_AIReviewVerdict(t *testing.T) {
 	dir := initRepo(t)
 	writeFile(t, dir, "svc.go", "package svc\n\nfunc S() int { return 1 }\n")

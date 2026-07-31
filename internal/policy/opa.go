@@ -54,9 +54,15 @@ type EvalInput struct {
 	TechnicalDebtDelta float64        `json:"technical_debt_delta"`
 	TestCoverage       float64        `json:"test_coverage"`
 	TestCoverageSource string         `json:"test_coverage_source,omitempty"`
-	ChangedFiles       []string       `json:"changed_files"`
-	Branch             string         `json:"branch"`
-	Committer          string         `json:"committer"`
+	// PatchCoverage is coverage of the diff's *added* lines (0..1), or −1 when
+	// not measured (no per-line coverage report, or no changed source line is
+	// tracked). Stronger than TestCoverage for a PR: it asks whether *this
+	// change's* new code is covered. Policies MUST guard with
+	// `input.patch_coverage >= 0`.
+	PatchCoverage float64  `json:"patch_coverage"`
+	ChangedFiles  []string `json:"changed_files"`
+	Branch        string   `json:"branch"`
+	Committer     string   `json:"committer"`
 	// AIReviews carries AI code-reviewer verdicts (semantic review). They are
 	// kept separate from Issues on purpose: deterministic findings may deny,
 	// probabilistic opinions default to routing attention only. Policies that
@@ -345,6 +351,23 @@ review_tier := "elevated" {
 review_tier := "elevated" {
     input.ai_generated
     input.merge_confidence.risky_paths[_]
+}
+
+# Patch (diff) coverage: is *this change's* new code tested? Warn + route
+# AI-authored changes whose added lines are poorly covered. −1 means not
+# measured (guard with >= 0). Threshold is tunable; deny stays opt-in.
+warn[msg] {
+    input.ai_generated
+    input.patch_coverage >= 0
+    input.patch_coverage < 0.8
+    pct := round(input.patch_coverage * 100)
+    msg = sprintf("AI-authored change: only %d%% of added lines are covered by tests", [pct])
+}
+
+review_tier := "elevated" {
+    input.ai_generated
+    input.patch_coverage >= 0
+    input.patch_coverage < 0.8
 }
 `
 }

@@ -554,18 +554,21 @@ func TestScaffoldPolicyReviewTier(t *testing.T) {
 			AIGenerated:        true,
 			AIConfidence:       0.6,
 			DetectionSources:   []string{"branch-name", "diff-heuristics"},
+			PatchCoverage:      -1, // isolate: elevated must come from the undisclosed rule
 		}, "elevated"},
 		{"disclosed AI keeps auto", &policy.EvalInput{
 			TechnicalDebtDelta: 0.5,
 			AIGenerated:        true,
 			AIConfidence:       0.9,
 			DetectionSources:   []string{"commit-trailer"},
+			PatchCoverage:      -1, // not measured
 		}, "auto"},
 		{"weak undisclosed suspicion stays below routing threshold", &policy.EvalInput{
 			TechnicalDebtDelta: 0.5,
 			AIGenerated:        true,
 			AIConfidence:       0.35, // branch prefix alone — warns, but does not re-route
 			DetectionSources:   []string{"branch-name"},
+			PatchCoverage:      -1, // not measured
 		}, "auto"},
 		{"disclosed AI adding source without tests routes elevated", &policy.EvalInput{
 			TechnicalDebtDelta: 0.5, // auto conditions otherwise hold — elevated must win without conflict
@@ -573,6 +576,7 @@ func TestScaffoldPolicyReviewTier(t *testing.T) {
 			AIConfidence:       0.9,
 			DetectionSources:   []string{"commit-trailer"},
 			MergeConfidence:    &policy.EvalMergeConfidence{AddedSourceWithoutTests: true, SourceFilesChanged: 1},
+			PatchCoverage:      -1, // isolate: elevated must come from the no-tests rule, not patch coverage
 		}, "elevated"},
 		{"disclosed AI touching a risky path routes elevated", &policy.EvalInput{
 			TechnicalDebtDelta: 0.5,
@@ -580,6 +584,7 @@ func TestScaffoldPolicyReviewTier(t *testing.T) {
 			AIConfidence:       0.9,
 			DetectionSources:   []string{"commit-trailer"},
 			MergeConfidence:    &policy.EvalMergeConfidence{RiskyPaths: []string{"go.mod"}},
+			PatchCoverage:      -1, // isolate: elevated must come from the risky-path rule
 		}, "elevated"},
 		{"human adding source without tests keeps auto (attribution raises the bar, not the fact alone)", &policy.EvalInput{
 			TechnicalDebtDelta: 0.5,
@@ -592,6 +597,26 @@ func TestScaffoldPolicyReviewTier(t *testing.T) {
 			AIConfidence:       0.9,
 			DetectionSources:   []string{"commit-trailer"},
 			MergeConfidence:    &policy.EvalMergeConfidence{TestsTouched: true, SourceFilesChanged: 1, TestFilesChanged: 1},
+			PatchCoverage:      -1, // not measured
+		}, "auto"},
+		{"disclosed AI with low patch coverage routes elevated", &policy.EvalInput{
+			TechnicalDebtDelta: 0.5, // auto conditions otherwise hold — elevated must win without conflict
+			AIGenerated:        true,
+			AIConfidence:       0.9,
+			DetectionSources:   []string{"commit-trailer"},
+			PatchCoverage:      0.4,
+		}, "elevated"},
+		{"disclosed AI with full patch coverage keeps auto", &policy.EvalInput{
+			TechnicalDebtDelta: 0.5,
+			AIGenerated:        true,
+			AIConfidence:       0.9,
+			DetectionSources:   []string{"commit-trailer"},
+			PatchCoverage:      1.0,
+		}, "auto"},
+		{"human low patch coverage keeps auto (attribution raises the bar)", &policy.EvalInput{
+			TechnicalDebtDelta: 0.5,
+			AIGenerated:        false,
+			PatchCoverage:      0.1,
 		}, "auto"},
 	}
 	for _, tc := range cases {

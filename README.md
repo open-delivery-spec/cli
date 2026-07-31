@@ -292,6 +292,37 @@ change is tested, scanned, and shaped like real work — it does not judge wheth
 the code is *correct* (that needs a human or an AI reviewer). It reduces how
 often a human has to reach that question.
 
+#### Patch coverage: `input.patch_coverage`
+
+`added_source_without_tests` answers "was *a* test touched?"; `patch_coverage`
+answers the stronger, still-deterministic question: **is this change's new code
+actually covered by tests?** ODS reads your existing coverage report (Go
+`coverage.out`, LCOV `lcov.info`, or Cobertura `coverage.xml` — no new tooling)
+and intersects the covered lines with the diff's *added* lines. The result is a
+fraction in `input.patch_coverage`, or **`-1` when no coverage report is
+present** — so policies must guard with `>= 0` before comparing:
+
+```rego
+# Default policy: AI-authored change whose added lines are under-covered → warn + elevate.
+ai_low_patch_coverage {
+    input.ai_generated == true
+    input.patch_coverage >= 0        # guard: -1 means "not measured"
+    input.patch_coverage < 0.8       # tune the threshold to your team
+}
+
+warn[msg] {
+    ai_low_patch_coverage
+    pct := round(input.patch_coverage * 100)
+    msg = sprintf("AI-authored change: only %d%% of added lines are covered by tests", [pct])
+}
+```
+
+Like the other merge-confidence signals it is advisory by default (warns and
+routes AI changes to `elevated`), attribution only raises the bar, and deny
+stays opt-in. NYC's `coverage-summary.json` is aggregate-only, so patch coverage
+is skipped (not `-1`-penalized) for NYC-only repos; whole-project coverage still
+flows through `input.test_coverage`.
+
 #### AI reviewer verdicts: `--ai-review`
 
 Static analysis covers known defect patterns; AI code reviewers (Copilot code

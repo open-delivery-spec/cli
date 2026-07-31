@@ -101,6 +101,7 @@ review_tier := "auto" {
     not ai_undisclosed
     not ai_undertested
     not ai_touches_risky_path
+    not ai_low_patch_coverage
 }
 
 review_tier := "elevated" {
@@ -149,12 +150,29 @@ ai_touches_risky_path {
     input.merge_confidence.risky_paths[_]
 }
 
+# Patch (diff) coverage: is this change's new code tested? −1 = not measured.
+ai_low_patch_coverage {
+    input.ai_generated == true
+    input.patch_coverage >= 0
+    input.patch_coverage < 0.8
+}
+
+warn[msg] {
+    ai_low_patch_coverage
+    pct := round(input.patch_coverage * 100)
+    msg = sprintf("AI-authored change: only %d%% of added lines are covered by tests", [pct])
+}
+
 review_tier := "elevated" {
     ai_undertested
 }
 
 review_tier := "elevated" {
     ai_touches_risky_path
+}
+
+review_tier := "elevated" {
+    ai_low_patch_coverage
 }
 
 has_high_or_critical {
