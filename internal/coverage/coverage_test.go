@@ -233,3 +233,107 @@ func TestDetect_SubdirLCOV(t *testing.T) {
 		t.Errorf("Source = %q, want lcov", res.Source)
 	}
 }
+
+// ─── Per-line coverage (patch coverage) ──────────────────────────
+
+func TestParseGoLines(t *testing.T) {
+	// a.go:1-3 covered (count 1), a.go:5-7 not covered (count 0).
+	path := writeTemp(t, "coverage.out", goCoverage)
+	hits, err := parseGoLines(path)
+	if err != nil {
+		t.Fatalf("parseGoLines: %v", err)
+	}
+	m := hits["github.com/x/a.go"]
+	if m == nil {
+		t.Fatalf("no hits for a.go: %v", hits)
+	}
+	for _, ln := range []int{1, 2, 3} {
+		if m[ln] <= 0 {
+			t.Errorf("line %d should be covered", ln)
+		}
+	}
+	for _, ln := range []int{5, 6, 7} {
+		if hc, ok := m[ln]; !ok || hc != 0 {
+			t.Errorf("line %d should be tracked-but-uncovered (hits=0), got %d ok=%v", ln, hc, ok)
+		}
+	}
+	if _, ok := m[4]; ok {
+		t.Error("line 4 is between blocks and must not be tracked")
+	}
+}
+
+func TestParseLCOVLines(t *testing.T) {
+	lcov := "SF:src/a.js\nDA:1,3\nDA:2,0\nDA:5,1\nend_of_record\n"
+	path := writeTemp(t, "lcov.info", lcov)
+	hits, err := parseLCOVLines(path)
+	if err != nil {
+		t.Fatalf("parseLCOVLines: %v", err)
+	}
+	m := hits["src/a.js"]
+	if m[1] != 3 || m[5] != 1 {
+		t.Errorf("covered lines wrong: %v", m)
+	}
+	if hc, ok := m[2]; !ok || hc != 0 {
+		t.Errorf("line 2 should be tracked-uncovered, got %d ok=%v", hc, ok)
+	}
+}
+
+func TestParseCoberturaLines(t *testing.T) {
+	xmlDoc := `<coverage><packages><package><classes>
+<class filename="src/a.py"><lines>
+<line number="1" hits="2"/><line number="2" hits="0"/>
+</lines></class></classes></package></packages></coverage>`
+	path := writeTemp(t, "coverage.xml", xmlDoc)
+	hits, err := parseCoberturaLines(path)
+	if err != nil {
+		t.Fatalf("parseCoberturaLines: %v", err)
+	}
+	m := hits["src/a.py"]
+	if m[1] != 2 {
+		t.Errorf("line 1 hits = %d, want 2", m[1])
+	}
+	if hc, ok := m[2]; !ok || hc != 0 {
+		t.Errorf("line 2 should be tracked-uncovered, got %d ok=%v", hc, ok)
+	}
+}
+
+func TestPatchCoverage_suffixMatchAndTracking(t *testing.T) {
+	// Coverage keys are import-qualified; diff paths are repo-relative.
+	hits := LineHits{
+		"github.com/org/repo/internal/svc.go": {10: 1, 11: 0, 12: 1},
+	}
+	added := map[string][]int{
+		// line 10 covered, 11 tracked-uncovered, 13 not tracked (excluded)
+		"internal/svc.go": {10, 11, 13},
+	}
+	covered, total := PatchCoverage(added, hits)
+	if covered != 1 || total != 2 {
+		t.Errorf("covered/total = %d/%d, want 1/2 (line 13 untracked → excluded)", covered, total)
+	}
+}
+
+func TestPatchCoverage_unmatchedFileContributesNothing(t *testing.T) {
+	hits := LineHits{"github.com/org/repo/a.go": {1: 1}}
+	added := map[string][]int{"totally/different.go": {1, 2, 3}}
+	covered, total := PatchCoverage(added, hits)
+	if covered != 0 || total != 0 {
+		t.Errorf("unmatched file must contribute nothing, got %d/%d", covered, total)
+	}
+}
+
+func TestDetectLines_findsGo(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "coverage.out"), []byte(goCoverage), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hits, src, ok := DetectLines(dir)
+	if !ok || src != SourceGo || len(hits) == 0 {
+		t.Fatalf("DetectLines = ok=%v src=%v n=%d", ok, src, len(hits))
+	}
+}
+
+func TestDetectLines_noneFound(t *testing.T) {
+	if _, _, ok := DetectLines(t.TempDir()); ok {
+		t.Error("DetectLines should report ok=false when no report exists")
+	}
+}

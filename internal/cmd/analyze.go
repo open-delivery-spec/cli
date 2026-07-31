@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/open-delivery-spec/cli/internal/analyzer"
@@ -365,6 +366,75 @@ func getAllChangedFiles(base string) ([]string, error) {
 		}
 	}
 	return files, nil
+}
+
+// getDiffAddedLineNumbers returns, per changed code file, the new-file line
+// numbers of added (+) lines in the diff — used for patch (diff) coverage.
+func getDiffAddedLineNumbers(base string) (map[string][]int, error) {
+	out, err := exec.Command("git", "diff", "--name-only", base).Output()
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string][]int)
+	for _, name := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		name = strings.TrimSpace(name)
+		if name == "" || !isCodeFileExt(name) {
+			continue
+		}
+		diffOut, err := exec.Command("git", "diff", base, "--", name).Output()
+		if err != nil {
+			continue
+		}
+		if nums := addedLineNumbers(diffOut); len(nums) > 0 {
+			result[name] = nums
+		}
+	}
+	return result, nil
+}
+
+// addedLineNumbers parses a unified diff for one file and returns the new-file
+// line numbers of its added lines. Removed lines do not advance the new-file
+// counter; context and added lines do.
+func addedLineNumbers(diff []byte) []int {
+	var nums []int
+	newLine := 0
+	for _, line := range strings.Split(string(diff), "\n") {
+		if strings.HasPrefix(line, "@@") {
+			newLine = parseHunkNewStart(line)
+			continue
+		}
+		if newLine == 0 {
+			continue // still in the file header, before the first hunk
+		}
+		switch {
+		case strings.HasPrefix(line, "+"): // added line (headers like +++ are pre-hunk)
+			nums = append(nums, newLine)
+			newLine++
+		case strings.HasPrefix(line, "-"): // removed line: no new-file advance
+		case strings.HasPrefix(line, "\\"): // "\ No newline at end of file"
+		default: // context line
+			newLine++
+		}
+	}
+	return nums
+}
+
+// parseHunkNewStart extracts the new-file start line c from "@@ -a,b +c,d @@".
+func parseHunkNewStart(hunk string) int {
+	plus := strings.IndexByte(hunk, '+')
+	if plus < 0 {
+		return 0
+	}
+	rest := hunk[plus+1:]
+	end := 0
+	for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
+		end++
+	}
+	n, err := strconv.Atoi(rest[:end])
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 func extractAdded(diff []byte) []string {

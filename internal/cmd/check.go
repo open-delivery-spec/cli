@@ -203,6 +203,18 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	logx.Debugf("check: merge-confidence tests_touched=%t added_source_without_tests=%t risky_paths=%d files=%d",
 		mc.TestsTouched, mc.AddedSourceWithoutTests, len(mc.RiskyPaths), mc.FilesChanged)
 
+	// Patch (diff) coverage: of the added lines, how many are covered by tests?
+	// Requires a per-line coverage report; −1 ("not measured") otherwise.
+	patchCoverage := coverage.NotMeasured
+	if hits, src, ok := coverage.DetectLines("."); ok {
+		if added, err := getDiffAddedLineNumbers(diffBase); err == nil {
+			if cov, tot := coverage.PatchCoverage(added, hits); tot > 0 {
+				patchCoverage = float64(cov) / float64(tot)
+				logx.Debugf("check: patch coverage %.2f (%d/%d added lines, source=%s)", patchCoverage, cov, tot, src)
+			}
+		}
+	}
+
 	// Build policy input
 	evalInput := &policy.EvalInput{
 		AIGenerated:        detectResult.AIGenerated,
@@ -213,6 +225,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		TestCoverageSource: scoreResult.Breakdown.TestCoverageSource,
 		Branch:             detectOpts.BranchName,
 		ChangedFiles:       changedFiles,
+		PatchCoverage:      patchCoverage,
 		MergeConfidence: &policy.EvalMergeConfidence{
 			FilesChanged:            mc.FilesChanged,
 			SourceFilesChanged:      mc.SourceFilesChanged,
@@ -312,7 +325,8 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		out := struct {
 			*policy.EvalResult
 			MergeConfidence *policy.EvalMergeConfidence `json:"merge_confidence,omitempty"`
-		}{EvalResult: result, MergeConfidence: evalInput.MergeConfidence}
+			PatchCoverage   float64                     `json:"patch_coverage"`
+		}{EvalResult: result, MergeConfidence: evalInput.MergeConfidence, PatchCoverage: evalInput.PatchCoverage}
 		data, err := json.MarshalIndent(out, "", "  ")
 		if err != nil {
 			return err

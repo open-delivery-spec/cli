@@ -439,7 +439,7 @@ func TestDefaultPolicyMergeConfidence(t *testing.T) {
 	}{
 		{
 			"AI source without tests warns and elevates",
-			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"},
+			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: -1,
 				MergeConfidence: &EvalMergeConfidence{AddedSourceWithoutTests: true, SourceFilesChanged: 1}},
 			"no tests", ReviewTierElevated,
 		},
@@ -451,19 +451,39 @@ func TestDefaultPolicyMergeConfidence(t *testing.T) {
 		},
 		{
 			"AI change touching a risky path warns and elevates",
-			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"},
+			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: -1,
 				MergeConfidence: &EvalMergeConfidence{RiskyPaths: []string{".github/workflows/ci.yml"}}},
 			"sensitive path", ReviewTierElevated,
 		},
 		{
 			"tested AI change is neutral",
-			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"},
+			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: -1,
 				MergeConfidence: &EvalMergeConfidence{TestsTouched: true, SourceFilesChanged: 1, TestFilesChanged: 1}},
 			"", "",
 		},
 		{
 			"absent merge_confidence is safe",
-			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}},
+			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: -1},
+			"", "",
+		},
+		{
+			"AI change with low patch coverage warns and elevates",
+			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: 0.4},
+			"added lines are covered", ReviewTierElevated,
+		},
+		{
+			"AI change with full patch coverage is neutral",
+			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: 1.0},
+			"", "",
+		},
+		{
+			"human low patch coverage neither warns nor elevates",
+			&EvalInput{AIGenerated: false, PatchCoverage: 0.1},
+			"", "",
+		},
+		{
+			"unmeasured patch coverage does not fire",
+			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: -1},
 			"", "",
 		},
 	}
