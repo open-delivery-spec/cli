@@ -33,11 +33,25 @@ jobs:
           echo "Checking PR description structure..."
           echo "PR title: ${{ github.event.pull_request.title }}"
 
+      # Dogfood mutation testing: run gremlins on the packages this PR changed,
+      # scoped to the diff by ods check --mutation. Advisory — the script never
+      # fails the job — and skips the slow e2e package.
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.25'
+          cache: false
+
+      - name: Diff-scoped mutation report (advisory)
+        timeout-minutes: 15
+        run: bash .github/scripts/mutation-report.sh "${{ github.event.pull_request.base.sha || 'origin/main' }}" gremlins.json
+
       - name: ODS AI code quality gate
         uses: open-delivery-spec/validate-action@v1
         with:
           diff-base: ${{ github.event.pull_request.base.sha || 'origin/main' }}
           branch: ${{ github.head_ref }}
+          mutation-report: gremlins.json
           # Dogfood the CLI version under test, not main. Otherwise an analyzer
           # behaviour change is judged by the old analyzer it replaces, and any
           # PR that adjusts the rules can never pass its own gate. Use the head
