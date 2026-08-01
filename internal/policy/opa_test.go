@@ -439,7 +439,7 @@ func TestDefaultPolicyMergeConfidence(t *testing.T) {
 	}{
 		{
 			"AI source without tests warns and elevates",
-			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: -1,
+			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: -1, MutationScore: -1,
 				MergeConfidence: &EvalMergeConfidence{AddedSourceWithoutTests: true, SourceFilesChanged: 1}},
 			"no tests", ReviewTierElevated,
 		},
@@ -451,29 +451,29 @@ func TestDefaultPolicyMergeConfidence(t *testing.T) {
 		},
 		{
 			"AI change touching a risky path warns and elevates",
-			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: -1,
+			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: -1, MutationScore: -1,
 				MergeConfidence: &EvalMergeConfidence{RiskyPaths: []string{".github/workflows/ci.yml"}}},
 			"sensitive path", ReviewTierElevated,
 		},
 		{
 			"tested AI change is neutral",
-			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: -1,
+			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: -1, MutationScore: -1,
 				MergeConfidence: &EvalMergeConfidence{TestsTouched: true, SourceFilesChanged: 1, TestFilesChanged: 1}},
 			"", "",
 		},
 		{
 			"absent merge_confidence is safe",
-			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: -1},
+			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: -1, MutationScore: -1},
 			"", "",
 		},
 		{
 			"AI change with low patch coverage warns and elevates",
-			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: 0.4},
+			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: 0.4, MutationScore: -1},
 			"added lines are covered", ReviewTierElevated,
 		},
 		{
 			"AI change with full patch coverage is neutral",
-			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: 1.0},
+			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: 1.0, MutationScore: -1},
 			"", "",
 		},
 		{
@@ -483,7 +483,27 @@ func TestDefaultPolicyMergeConfidence(t *testing.T) {
 		},
 		{
 			"unmeasured patch coverage does not fire",
-			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: -1},
+			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: -1, MutationScore: -1},
+			"", "",
+		},
+		{
+			"AI change with weak mutation score warns and elevates",
+			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: -1, MutationScore: 0.3},
+			"kill only", ReviewTierElevated,
+		},
+		{
+			"AI change with strong mutation score is neutral",
+			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: -1, MutationScore: 0.9},
+			"", "",
+		},
+		{
+			"human weak mutation score neither warns nor elevates",
+			&EvalInput{AIGenerated: false, PatchCoverage: -1, MutationScore: 0.1},
+			"", "",
+		},
+		{
+			"unmeasured mutation score does not fire",
+			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: -1, MutationScore: -1},
 			"", "",
 		},
 	}
