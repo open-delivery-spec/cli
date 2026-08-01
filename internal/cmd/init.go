@@ -102,6 +102,7 @@ review_tier := "auto" {
     not ai_undertested
     not ai_touches_risky_path
     not ai_low_patch_coverage
+    not ai_weak_mutation_score
 }
 
 review_tier := "elevated" {
@@ -162,6 +163,23 @@ warn[msg] {
     pct := round(input.patch_coverage * 100)
     msg = sprintf("AI-authored change: only %d%% of added lines are covered by tests", [pct])
 }
+
+# Mutation score (diff-scoped): do the tests catch changes to the new code, not
+# just run it? −1 = not measured. Scores run lower than coverage, so a lower
+# threshold. Fed by ` + "`ods check --mutation <gremlins.json>`" + `.
+ai_weak_mutation_score {
+    input.ai_generated == true
+    input.mutation_score >= 0
+    input.mutation_score < 0.5
+}
+
+warn[msg] {
+    ai_weak_mutation_score
+    pct := round(input.mutation_score * 100)
+    msg = sprintf("AI-authored change: tests kill only %d%% of mutations on the added lines", [pct])
+}
+
+review_tier := "elevated" { ai_weak_mutation_score }
 
 review_tier := "elevated" {
     ai_undertested

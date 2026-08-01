@@ -562,6 +562,7 @@ func TestScaffoldPolicyReviewTier(t *testing.T) {
 			AIConfidence:       0.9,
 			DetectionSources:   []string{"commit-trailer"},
 			PatchCoverage:      -1, // not measured
+			MutationScore:      -1,
 		}, "auto"},
 		{"weak undisclosed suspicion stays below routing threshold", &policy.EvalInput{
 			TechnicalDebtDelta: 0.5,
@@ -569,6 +570,7 @@ func TestScaffoldPolicyReviewTier(t *testing.T) {
 			AIConfidence:       0.35, // branch prefix alone — warns, but does not re-route
 			DetectionSources:   []string{"branch-name"},
 			PatchCoverage:      -1, // not measured
+			MutationScore:      -1,
 		}, "auto"},
 		{"disclosed AI adding source without tests routes elevated", &policy.EvalInput{
 			TechnicalDebtDelta: 0.5, // auto conditions otherwise hold — elevated must win without conflict
@@ -577,6 +579,7 @@ func TestScaffoldPolicyReviewTier(t *testing.T) {
 			DetectionSources:   []string{"commit-trailer"},
 			MergeConfidence:    &policy.EvalMergeConfidence{AddedSourceWithoutTests: true, SourceFilesChanged: 1},
 			PatchCoverage:      -1, // isolate: elevated must come from the no-tests rule, not patch coverage
+			MutationScore:      -1,
 		}, "elevated"},
 		{"disclosed AI touching a risky path routes elevated", &policy.EvalInput{
 			TechnicalDebtDelta: 0.5,
@@ -585,6 +588,7 @@ func TestScaffoldPolicyReviewTier(t *testing.T) {
 			DetectionSources:   []string{"commit-trailer"},
 			MergeConfidence:    &policy.EvalMergeConfidence{RiskyPaths: []string{"go.mod"}},
 			PatchCoverage:      -1, // isolate: elevated must come from the risky-path rule
+			MutationScore:      -1,
 		}, "elevated"},
 		{"human adding source without tests keeps auto (attribution raises the bar, not the fact alone)", &policy.EvalInput{
 			TechnicalDebtDelta: 0.5,
@@ -598,6 +602,7 @@ func TestScaffoldPolicyReviewTier(t *testing.T) {
 			DetectionSources:   []string{"commit-trailer"},
 			MergeConfidence:    &policy.EvalMergeConfidence{TestsTouched: true, SourceFilesChanged: 1, TestFilesChanged: 1},
 			PatchCoverage:      -1, // not measured
+			MutationScore:      -1,
 		}, "auto"},
 		{"disclosed AI with low patch coverage routes elevated", &policy.EvalInput{
 			TechnicalDebtDelta: 0.5, // auto conditions otherwise hold — elevated must win without conflict
@@ -605,6 +610,7 @@ func TestScaffoldPolicyReviewTier(t *testing.T) {
 			AIConfidence:       0.9,
 			DetectionSources:   []string{"commit-trailer"},
 			PatchCoverage:      0.4,
+			MutationScore:      -1, // isolate: elevated must come from patch coverage
 		}, "elevated"},
 		{"disclosed AI with full patch coverage keeps auto", &policy.EvalInput{
 			TechnicalDebtDelta: 0.5,
@@ -612,11 +618,34 @@ func TestScaffoldPolicyReviewTier(t *testing.T) {
 			AIConfidence:       0.9,
 			DetectionSources:   []string{"commit-trailer"},
 			PatchCoverage:      1.0,
+			MutationScore:      -1,
 		}, "auto"},
 		{"human low patch coverage keeps auto (attribution raises the bar)", &policy.EvalInput{
 			TechnicalDebtDelta: 0.5,
 			AIGenerated:        false,
 			PatchCoverage:      0.1,
+		}, "auto"},
+		{"disclosed AI with weak mutation score routes elevated", &policy.EvalInput{
+			TechnicalDebtDelta: 0.5, // auto conditions otherwise hold — elevated must win without conflict
+			AIGenerated:        true,
+			AIConfidence:       0.9,
+			DetectionSources:   []string{"commit-trailer"},
+			PatchCoverage:      -1, // isolate: elevated must come from the mutation rule
+			MutationScore:      0.3,
+		}, "elevated"},
+		{"disclosed AI with strong mutation score keeps auto", &policy.EvalInput{
+			TechnicalDebtDelta: 0.5,
+			AIGenerated:        true,
+			AIConfidence:       0.9,
+			DetectionSources:   []string{"commit-trailer"},
+			PatchCoverage:      -1,
+			MutationScore:      0.9,
+		}, "auto"},
+		{"human weak mutation score keeps auto (attribution raises the bar)", &policy.EvalInput{
+			TechnicalDebtDelta: 0.5,
+			AIGenerated:        false,
+			PatchCoverage:      -1,
+			MutationScore:      0.1,
 		}, "auto"},
 	}
 	for _, tc := range cases {

@@ -323,6 +323,41 @@ stays opt-in. NYC's `coverage-summary.json` is aggregate-only, so patch coverage
 is skipped (not `-1`-penalized) for NYC-only repos; whole-project coverage still
 flows through `input.test_coverage`.
 
+#### Mutation score: `input.mutation_score`
+
+Coverage proves a line *ran*; it can't prove a test would *catch a bug* in it —
+the classic AI failure mode is green coverage over assertions that never fail.
+Mutation testing closes that gap: it injects small faults ("mutants") and checks
+whether the suite kills them. ODS is a **signal consumer**, not a test runner —
+run [gremlins](https://github.com/go-gremlins/gremlins) in CI and point ODS at
+its JSON report:
+
+```bash
+gremlins unleash --output gremlins.json ./...
+ods check --mutation gremlins.json
+```
+
+ODS computes a **diff-scoped** mutation score — over only the mutants on the
+change's *added* lines — as `killed / (killed + survived)` (a timed-out mutant
+counts as killed; not-covered / not-viable mutants are excluded). The result is
+`input.mutation_score`, or **`-1` when not measured** (no report, or no mutant on
+a changed line), so guard with `>= 0`:
+
+```rego
+# AI-authored change whose new code has weak tests → warn + elevate.
+warn[msg] {
+    input.ai_generated
+    input.mutation_score >= 0        # guard: -1 means "not measured"
+    input.mutation_score < 0.5       # mutation scores run lower than coverage
+    pct := round(input.mutation_score * 100)
+    msg = sprintf("AI-authored change: tests kill only %d%% of mutations on the added lines", [pct])
+}
+```
+
+Mutation testing is slower than the other signals (it re-runs the suite per
+mutant), so it's opt-in: no `--mutation`, no `mutation_score`. Same posture as
+the rest — advisory, attribution raises the bar, deny opt-in.
+
 #### AI reviewer verdicts: `--ai-review`
 
 Static analysis covers known defect patterns; AI code reviewers (Copilot code

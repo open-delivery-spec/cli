@@ -773,6 +773,80 @@ func TestPipeline_PatchCoverage(t *testing.T) {
 	})
 }
 
+// TestPipeline_MutationScore covers diff-scoped mutation score end to end: an
+// AI-authored change whose added lines have surviving mutants (weak tests) warns
+// and routes to elevated (never denies); when all mutants on those lines are
+// killed, the signal clears. A gremlins report is supplied via --mutation; a
+// test file is added so the no-tests signal is not what drives the routing.
+func TestPipeline_MutationScore(t *testing.T) {
+	const svc = "package svc\n\nfunc Add(a, b int) int {\n\treturn a + b\n}\n\nfunc Sub(a, b int) int {\n\treturn a - b\n}\n"
+	const svcTest = "package svc\n\nimport \"testing\"\n\nfunc TestAdd(t *testing.T) {\n\tif Add(1, 2) != 3 {\n\t\tt.Fail()\n\t}\n}\n"
+
+	runCheck := func(t *testing.T, dir string) (allowed bool, tier string, warnings []string) {
+		t.Helper()
+		out, _, exit := runODSStreams(t, dir, "check", "--json", "--mutation", "gremlins.json")
+		if exit != 0 {
+			t.Fatalf("check exit = %d, want 0 (mutation score must not deny)\n%s", exit, out)
+		}
+		var res struct {
+			Allowed       bool     `json:"allowed"`
+			ReviewTier    string   `json:"review_tier"`
+			Warnings      []string `json:"warnings"`
+			MutationScore float64  `json:"mutation_score"`
+		}
+		mustJSON(t, out, &res)
+		return res.Allowed, res.ReviewTier, res.Warnings
+	}
+	hasMutationWarn := func(warnings []string) bool {
+		for _, w := range warnings {
+			if strings.Contains(w, "kill only") {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("weak mutation score AI diff warns and elevates", func(t *testing.T) {
+		dir := initRepo(t)
+		writeFile(t, dir, "svc.go", svc)
+		writeFile(t, dir, "svc_test.go", svcTest)
+		git(t, dir, "add", ".")
+		git(t, dir, "commit", "-m", "feat: add svc\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
+		// Both mutants on added return lines survive: 0/2 killed → 0% MSI.
+		writeFile(t, dir, "gremlins.json", `{"files":[{"file_name":"svc.go","mutations":[{"line":4,"status":"LIVED"},{"line":8,"status":"LIVED"}]}]}`)
+		allowed, tier, warnings := runCheck(t, dir)
+		if !allowed {
+			t.Error("mutation score must never deny by default")
+		}
+		if tier != "elevated" {
+			t.Errorf("review_tier = %q, want elevated (AI diff with weak mutation score)", tier)
+		}
+		if !hasMutationWarn(warnings) {
+			t.Errorf("expected a mutation-score warning, got %v", warnings)
+		}
+	})
+
+	t.Run("strong mutation score AI diff clears the signal", func(t *testing.T) {
+		dir := initRepo(t)
+		writeFile(t, dir, "svc.go", svc)
+		writeFile(t, dir, "svc_test.go", svcTest)
+		git(t, dir, "add", ".")
+		git(t, dir, "commit", "-m", "feat: add svc\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
+		// Both mutants on added lines are killed: 2/2 → 100% MSI.
+		writeFile(t, dir, "gremlins.json", `{"files":[{"file_name":"svc.go","mutations":[{"line":4,"status":"KILLED"},{"line":8,"status":"KILLED"}]}]}`)
+		allowed, tier, warnings := runCheck(t, dir)
+		if !allowed {
+			t.Error("strong mutation score change must stay allowed")
+		}
+		if tier == "elevated" {
+			t.Errorf("strong mutation score must not route elevated, got %q", tier)
+		}
+		if hasMutationWarn(warnings) {
+			t.Errorf("strong mutation score must not draw the mutation warning, got %v", warnings)
+		}
+	})
+}
+
 func TestPipeline_AIReviewVerdict(t *testing.T) {
 	dir := initRepo(t)
 	writeFile(t, dir, "svc.go", "package svc\n\nfunc S() int { return 1 }\n")

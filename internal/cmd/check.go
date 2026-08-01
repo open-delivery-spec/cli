@@ -12,6 +12,7 @@ import (
 	"github.com/open-delivery-spec/cli/internal/detector"
 	"github.com/open-delivery-spec/cli/internal/logx"
 	"github.com/open-delivery-spec/cli/internal/mergeconf"
+	"github.com/open-delivery-spec/cli/internal/mutation"
 	"github.com/open-delivery-spec/cli/internal/policy"
 	"github.com/open-delivery-spec/cli/internal/review"
 	"github.com/open-delivery-spec/cli/internal/sarif"
@@ -25,6 +26,7 @@ var (
 	checkSARIF      string
 	checkDiffBase   string
 	checkAIReviews  []string
+	checkMutation   string
 )
 
 var checkCmd = &cobra.Command{
@@ -64,6 +66,8 @@ func init() {
 		"git ref to diff against (default: $ODS_DIFF_BASE or HEAD~1)")
 	checkCmd.Flags().StringArrayVar(&checkAIReviews, "ai-review", nil,
 		"AI review verdict file (ods.dev/review-verdict/v1); repeatable. Advisory by default: routes review attention, never denies unless your policy opts in")
+	checkCmd.Flags().StringVar(&checkMutation, "mutation", "",
+		"mutation-testing report (gremlins JSON) whose diff-scoped mutation score is fed to the policy input")
 }
 
 func runCheck(cmd *cobra.Command, args []string) error {
@@ -215,6 +219,23 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Mutation score (diff-scoped): of the mutants on the added lines, how many
+	// did the tests kill? Ingested from a gremlins report via --mutation; −1
+	// ("not measured") when no report is given or no mutant lands on a change.
+	mutationScore := mutation.NotMeasured
+	if checkMutation != "" {
+		report, err := mutation.Parse(checkMutation)
+		if err != nil {
+			return err
+		}
+		if added, err := getDiffAddedLineNumbers(diffBase); err == nil {
+			if killed, tot := report.DiffScopedMSI(added); tot > 0 {
+				mutationScore = float64(killed) / float64(tot)
+				logx.Debugf("check: mutation score %.2f (%d/%d mutants on added lines)", mutationScore, killed, tot)
+			}
+		}
+	}
+
 	// Build policy input
 	evalInput := &policy.EvalInput{
 		AIGenerated:        detectResult.AIGenerated,
@@ -226,6 +247,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		Branch:             detectOpts.BranchName,
 		ChangedFiles:       changedFiles,
 		PatchCoverage:      patchCoverage,
+		MutationScore:      mutationScore,
 		MergeConfidence: &policy.EvalMergeConfidence{
 			FilesChanged:            mc.FilesChanged,
 			SourceFilesChanged:      mc.SourceFilesChanged,
@@ -326,7 +348,8 @@ func runCheck(cmd *cobra.Command, args []string) error {
 			*policy.EvalResult
 			MergeConfidence *policy.EvalMergeConfidence `json:"merge_confidence,omitempty"`
 			PatchCoverage   float64                     `json:"patch_coverage"`
-		}{EvalResult: result, MergeConfidence: evalInput.MergeConfidence, PatchCoverage: evalInput.PatchCoverage}
+			MutationScore   float64                     `json:"mutation_score"`
+		}{EvalResult: result, MergeConfidence: evalInput.MergeConfidence, PatchCoverage: evalInput.PatchCoverage, MutationScore: evalInput.MutationScore}
 		data, err := json.MarshalIndent(out, "", "  ")
 		if err != nil {
 			return err

@@ -59,7 +59,14 @@ type EvalInput struct {
 	// tracked). Stronger than TestCoverage for a PR: it asks whether *this
 	// change's* new code is covered. Policies MUST guard with
 	// `input.patch_coverage >= 0`.
-	PatchCoverage float64  `json:"patch_coverage"`
+	PatchCoverage float64 `json:"patch_coverage"`
+	// MutationScore is the diff-scoped mutation score (0..1): of the mutants
+	// injected on the change's added lines, the fraction the tests killed, or −1
+	// when not measured (no mutation report, or no mutant on a changed line).
+	// Stronger than coverage — it asks whether the tests *assert*, not just
+	// execute. Ingested from a gremlins report via `ods check --mutation`.
+	// Policies MUST guard with `input.mutation_score >= 0`.
+	MutationScore float64  `json:"mutation_score"`
 	ChangedFiles  []string `json:"changed_files"`
 	Branch        string   `json:"branch"`
 	// AIReviews carries AI code-reviewer verdicts (semantic review). They are
@@ -367,6 +374,25 @@ review_tier := "elevated" {
     input.ai_generated
     input.patch_coverage >= 0
     input.patch_coverage < 0.8
+}
+
+# Mutation score (diff-scoped): do the tests actually *catch* changes to the new
+# code, or just execute it? Warn + route AI-authored changes whose added lines
+# have a weak mutation score. −1 means not measured (guard with >= 0). Mutation
+# scores run lower than coverage, so the default threshold is lower; tune it.
+# Deny stays opt-in.
+warn[msg] {
+    input.ai_generated
+    input.mutation_score >= 0
+    input.mutation_score < 0.5
+    pct := round(input.mutation_score * 100)
+    msg = sprintf("AI-authored change: tests kill only %d%% of mutations on the added lines", [pct])
+}
+
+review_tier := "elevated" {
+    input.ai_generated
+    input.mutation_score >= 0
+    input.mutation_score < 0.5
 }
 `
 }
