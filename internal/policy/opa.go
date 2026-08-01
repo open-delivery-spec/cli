@@ -62,7 +62,6 @@ type EvalInput struct {
 	PatchCoverage float64  `json:"patch_coverage"`
 	ChangedFiles  []string `json:"changed_files"`
 	Branch        string   `json:"branch"`
-	Committer     string   `json:"committer"`
 	// AIReviews carries AI code-reviewer verdicts (semantic review). They are
 	// kept separate from Issues on purpose: deterministic findings may deny,
 	// probabilistic opinions default to routing attention only. Policies that
