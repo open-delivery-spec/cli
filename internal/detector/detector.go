@@ -848,3 +848,33 @@ func nonEmptyLines(s string) []string {
 	}
 	return result
 }
+
+// EvidenceTier classifies the strongest AI-attribution evidence present in the
+// detection sources into an ordered confidence label — a summary of how the
+// attribution was obtained, not a new signal and not forensic proof of
+// authorship. Ordered corroborated > attested > inferred; returns "" when no
+// attribution source is present (the caller omits the field).
+//
+//	corroborated  git-ai-notes                  (independently measured lines)
+//	attested      commit-trailer, pr-body       (author/tool declared it)
+//	inferred      branch-name, diff-heuristics   (heuristic only)
+func EvidenceTier(sources []string) string {
+	rank := map[string]int{"": 0, "inferred": 1, "attested": 2, "corroborated": 3}
+	tier := ""
+	bump := func(t string) {
+		if rank[t] > rank[tier] {
+			tier = t
+		}
+	}
+	for _, s := range sources {
+		switch s {
+		case "git-ai-notes":
+			bump("corroborated")
+		case "commit-trailer", "pr-body":
+			bump("attested")
+		case "branch-name", "diff-heuristics":
+			bump("inferred")
+		}
+	}
+	return tier
+}
