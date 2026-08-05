@@ -578,3 +578,44 @@ deny[msg] {
 		t.Error("explicit opt-in deny over ai_reviews must be able to block")
 	}
 }
+
+// TestEvidenceTierReachesPolicy locks in that input.evidence_tier marshals
+// through EvalInput to Rego (the conformance suite covers this too, but only
+// runs when ODS_CONFORMANCE_DIR is set; this keeps it in the hermetic suite).
+func TestEvidenceTierReachesPolicy(t *testing.T) {
+	policy := `package ods.policy
+default allow := true
+default review_tier := "standard"
+strong_evidence { input.evidence_tier == "corroborated" }
+strong_evidence { input.evidence_tier == "attested" }
+review_tier := "elevated" {
+    input.ai_generated
+    not strong_evidence
+}`
+	path := writeTempPolicy(t, policy)
+	cases := []struct {
+		name string
+		tier string
+		want string
+	}{
+		{"attested stays standard", "attested", "standard"},
+		{"corroborated stays standard", "corroborated", "standard"},
+		{"inferred routes elevated", "inferred", ReviewTierElevated},
+		{"empty tier routes elevated", "", ReviewTierElevated},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := Evaluate(path, &EvalInput{
+				AIGenerated:      true,
+				DetectionSources: []string{"x"},
+				EvidenceTier:     tc.tier,
+			})
+			if err != nil {
+				t.Fatalf("evaluate: %v", err)
+			}
+			if res.ReviewTier != tc.want {
+				t.Errorf("review_tier = %q, want %q", res.ReviewTier, tc.want)
+			}
+		})
+	}
+}

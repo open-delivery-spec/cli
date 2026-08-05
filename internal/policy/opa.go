@@ -69,6 +69,12 @@ type EvalInput struct {
 	MutationScore float64  `json:"mutation_score"`
 	ChangedFiles  []string `json:"changed_files"`
 	Branch        string   `json:"branch"`
+	// EvidenceTier is the strongest class of AI-attribution evidence present,
+	// derived from DetectionSources: "corroborated" (git-ai-notes) > "attested"
+	// (commit-trailer, pr-body) > "inferred" (branch-name, diff-heuristics).
+	// Empty when no attribution source fired. A confidence label for how the
+	// attribution was obtained — not forensic proof of authorship.
+	EvidenceTier string `json:"evidence_tier,omitempty"`
 	// AIReviews carries AI code-reviewer verdicts (semantic review). They are
 	// kept separate from Issues on purpose: deterministic findings may deny,
 	// probabilistic opinions default to routing attention only. Policies that

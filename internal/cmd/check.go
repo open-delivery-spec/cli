@@ -241,6 +241,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		AIGenerated:        detectResult.AIGenerated,
 		AIConfidence:       detectResult.Confidence,
 		DetectionSources:   detectResult.Sources,
+		EvidenceTier:       detector.EvidenceTier(detectResult.Sources),
 		TechnicalDebtDelta: scoreResult.TechnicalDebtDelta,
 		TestCoverage:       scoreResult.Breakdown.TestCoverage,
 		TestCoverageSource: scoreResult.Breakdown.TestCoverageSource,
@@ -349,7 +350,8 @@ func runCheck(cmd *cobra.Command, args []string) error {
 			MergeConfidence *policy.EvalMergeConfidence `json:"merge_confidence,omitempty"`
 			PatchCoverage   float64                     `json:"patch_coverage"`
 			MutationScore   float64                     `json:"mutation_score"`
-		}{EvalResult: result, MergeConfidence: evalInput.MergeConfidence, PatchCoverage: evalInput.PatchCoverage, MutationScore: evalInput.MutationScore}
+			EvidenceTier    string                      `json:"evidence_tier,omitempty"`
+		}{EvalResult: result, MergeConfidence: evalInput.MergeConfidence, PatchCoverage: evalInput.PatchCoverage, MutationScore: evalInput.MutationScore, EvidenceTier: evalInput.EvidenceTier}
 		data, err := json.MarshalIndent(out, "", "  ")
 		if err != nil {
 			return err

@@ -254,6 +254,37 @@ Undisclosed AI costs review attention, never a merge — and adding a
 `Co-Authored-By`/`Assisted-by` trailer or a PR-body disclosure silences the
 nudge.
 
+#### Evidence tier: `input.evidence_tier`
+
+`detection_sources` says *which* signals fired; `evidence_tier` collapses them
+into one ordered label for **how strong the attribution is** — a confidence
+level, not forensic proof of authorship:
+
+| Tier | Evidence | From |
+|------|----------|------|
+| `corroborated` | independently **measured** | `git-ai-notes` |
+| `attested` | author/tool **declared** it | `commit-trailer`, `pr-body` |
+| `inferred` | **heuristic** only | `branch-name`, `diff-heuristics` |
+
+It's the strongest source present (`corroborated > attested > inferred`), empty
+when nothing fired, derived deterministically from `detection_sources` — so it
+adds no new detection, just a summary a policy can gate on directly:
+
+```rego
+# Grant auto-merge only when attribution is at least attested.
+strong_evidence { input.evidence_tier == "corroborated" }
+strong_evidence { input.evidence_tier == "attested" }
+
+review_tier := "elevated" {
+    input.ai_generated
+    not strong_evidence          # inferred-only AI → extra eyes
+}
+```
+
+An author who strips the trailer drops to a weaker tier — ODS surfaces what it
+can see, it doesn't claim to unmask what hides. A low tier informs routing; it
+never denies on its own.
+
 #### Merge-confidence signals: `input.merge_confidence`
 
 Static analysis tells you what's *wrong*; these tell you whether the change is

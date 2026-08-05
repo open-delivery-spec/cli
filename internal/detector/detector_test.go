@@ -365,3 +365,28 @@ func TestAITrailerToolAssistedBy(t *testing.T) {
 		t.Errorf("AITrailerTool = %q, want empty for human commit", got)
 	}
 }
+
+func TestEvidenceTier(t *testing.T) {
+	cases := []struct {
+		name    string
+		sources []string
+		want    string
+	}{
+		{"none", nil, ""},
+		{"git-ai-notes is corroborated", []string{"git-ai-notes"}, "corroborated"},
+		{"commit-trailer is attested", []string{"commit-trailer"}, "attested"},
+		{"pr-body is attested", []string{"pr-body"}, "attested"},
+		{"branch-name is inferred", []string{"branch-name"}, "inferred"},
+		{"diff-heuristics is inferred", []string{"diff-heuristics"}, "inferred"},
+		{"highest present wins: trailer beats branch", []string{"branch-name", "commit-trailer"}, "attested"},
+		{"highest present wins: notes beat trailer", []string{"commit-trailer", "git-ai-notes"}, "corroborated"},
+		{"unknown source ignored", []string{"mystery"}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := EvidenceTier(tc.sources); got != tc.want {
+				t.Errorf("EvidenceTier(%v) = %q, want %q", tc.sources, got, tc.want)
+			}
+		})
+	}
+}
