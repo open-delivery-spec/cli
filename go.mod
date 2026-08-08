@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/open-policy-agent/opa v1.18.2
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
 )
 
@@ -37,5 +38,6 @@ require (
 	golang.org/x/crypto v0.52.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )

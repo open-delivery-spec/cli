@@ -526,6 +526,35 @@ ODS Analysis Rules (4)
 default severity, category, suggestion). It is the single source of truth for
 every rule the analyzer can emit.
 
+### `ods attest` — AI-Code Evidence Document
+
+Serializes everything the gate just evaluated into an **auditable evidence
+document**: a valid [CycloneDX 1.6](https://cyclonedx.org) BOM whose CDXA
+declarations carry one claim per governance requirement (disclosure, evidence
+grading, patch coverage, mutation score, policy verdict), each backed by
+evidence with a **re-fetchable locator** (workflow-run URL, commit SHA) — the
+artifact an "which code was AI-assisted, and what verification was applied?"
+audit request actually asks for. Design:
+[spec proposal 001](https://github.com/open-delivery-spec/spec/blob/main/docs/proposals/001-ai-code-evidence.md).
+
+```bash
+ods attest                          # writes evidence.cdx.json
+ods attest --out -                  # print to stdout
+ods attest --mutation gremlins.json # include the mutation-score requirement
+```
+
+Two invariants: **conformance carries the measured value, confidence carries
+how the fact was obtained** (the evidence tier) — never merged; and the
+document's own affirmation states that attribution is volunteered, not
+forensic, and nothing in it asserts code correctness. Every emitted document
+is schema-validated against the official CycloneDX 1.6 schema in CI.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--out` | `evidence.cdx.json` | Output path (`-` for stdout) |
+| `--policy`, `-p` | `.ods/policy.rego` | Policy whose verdict is attested |
+| `--sarif` / `--ai-review` / `--mutation` / `--diff-base` | — | Same inputs as `ods check` — the attested facts are the gate's facts |
+
 ### `ods report` — AI Attribution Report
 
 A governance view over recent history: how much delivered work is AI-assisted,
