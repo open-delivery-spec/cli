@@ -953,3 +953,55 @@ func TestPipeline_AnalyzeDocsOnly(t *testing.T) {
 		t.Errorf("summary = %q, want the explicit no-code summary", res.Summary)
 	}
 }
+
+// TestPipeline_Attest covers the evidence document end to end: an AI-authored
+// change produces a valid CycloneDX skeleton with the disclosure claim graded
+// by evidence tier, the policy verdict row, and the not-forensic affirmation.
+func TestPipeline_Attest(t *testing.T) {
+	dir := initRepo(t)
+	writeFile(t, dir, "svc.go", "package svc\n\nfunc Add(a, b int) int { return a + b }\n")
+	writeFile(t, dir, "svc_test.go", "package svc\n\nimport \"testing\"\n\nfunc TestAdd(t *testing.T) {\n\tif Add(1, 2) != 3 {\n\t\tt.Fail()\n\t}\n}\n")
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-m", "feat: add svc\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
+
+	out, exit := runODS(t, dir, "attest", "--out", "-")
+	if exit != 0 {
+		t.Fatalf("attest exit = %d, want 0\n%s", exit, out)
+	}
+	var doc struct {
+		BOMFormat    string `json:"bomFormat"`
+		SpecVersion  string `json:"specVersion"`
+		Declarations struct {
+			Claims []struct {
+				BOMRef string `json:"bom-ref"`
+			} `json:"claims"`
+			Attestations []struct {
+				Map []struct {
+					Requirement string `json:"requirement"`
+				} `json:"map"`
+			} `json:"attestations"`
+			Affirmation struct {
+				Statement string `json:"statement"`
+			} `json:"affirmation"`
+		} `json:"declarations"`
+	}
+	mustJSON(t, out, &doc)
+	if doc.BOMFormat != "CycloneDX" || doc.SpecVersion != "1.6" {
+		t.Errorf("bomFormat/specVersion = %q/%q, want CycloneDX/1.6", doc.BOMFormat, doc.SpecVersion)
+	}
+	reqs := map[string]bool{}
+	for _, m := range doc.Declarations.Attestations[0].Map {
+		reqs[m.Requirement] = true
+	}
+	for _, want := range []string{"req:ods-r1", "req:ods-r2", "req:ods-r3", "req:ods-r5"} {
+		if !reqs[want] {
+			t.Errorf("missing attestation row for %s (got %v)", want, reqs)
+		}
+	}
+	if reqs["req:ods-r6"] {
+		t.Error("R6 must be absent when the CI wrapper did not report pipeline integrity")
+	}
+	if !strings.Contains(doc.Declarations.Affirmation.Statement, "not forensic proof") {
+		t.Error("affirmation must state the not-forensic boundary")
+	}
+}

@@ -21,6 +21,7 @@ Commands:
   analyze  Analyze AI code quality
   score    Score technical debt impact
   check    Evaluate OPA Rego policy
+  attest   Emit an AI-code evidence document (CycloneDX)
   report   Summarize AI-assisted vs human work over recent history
   rules    List the built-in AI code quality rules
   hook     Install git hooks
