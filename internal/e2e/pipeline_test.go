@@ -926,3 +926,30 @@ func TestPipeline_AIReviewVerdict(t *testing.T) {
 		}
 	})
 }
+
+// TestPipeline_AnalyzeDocsOnly guards the benign-empty path: a diff that
+// resolves but contains no analyzable code (docs-only PR) must yield a valid
+// zero-issue JSON result at exit 0 — never the "no input provided" error — so
+// CI wrappers can tell "nothing to analyze" apart from "the analyzer crashed".
+func TestPipeline_AnalyzeDocsOnly(t *testing.T) {
+	dir := initRepo(t)
+	writeFile(t, dir, "docs/guide.md", "# guide\n\nprose only\n")
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-m", "docs: add guide")
+
+	out, exit := runODS(t, dir, "analyze", "--json")
+	if exit != 0 {
+		t.Fatalf("analyze on a docs-only diff must exit 0, got %d\n%s", exit, out)
+	}
+	var res struct {
+		Issues  []any  `json:"issues"`
+		Summary string `json:"summary"`
+	}
+	mustJSON(t, out, &res)
+	if len(res.Issues) != 0 {
+		t.Errorf("expected no issues, got %v", res.Issues)
+	}
+	if !strings.Contains(res.Summary, "No analyzable code") {
+		t.Errorf("summary = %q, want the explicit no-code summary", res.Summary)
+	}
+}
