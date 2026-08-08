@@ -113,6 +113,9 @@ func init() {
 
 func runAnalyze(cmd *cobra.Command, args []string) error {
 	var files map[string][]string
+	// noLocalCode marks a resolved diff that simply contains no analyzable
+	// code files (docs-only change) — a valid empty result, not a failure.
+	noLocalCode := false
 
 	if len(args) > 0 {
 		// Explicit file arguments (e.g. from a pre-commit hook passing staged
@@ -145,16 +148,26 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	} else {
 		// Default: analyze the git diff over the resolved base.
 		diffFiles, err := getGitDiffFiles(resolveDiffBase(analyzeDiffBase))
-		if err == nil && len(diffFiles) > 0 {
+		switch {
+		case err == nil && len(diffFiles) > 0:
 			files = diffFiles
-		} else if analyzeSARIF == "" {
-			// No local code to analyze and no external findings to merge.
+		case err == nil:
+			// The diff resolved but contains no analyzable code (e.g. a
+			// docs-only PR). That is a legitimate empty result, not a failure:
+			// proceed with no files and emit a valid zero-issue report — a CI
+			// wrapper must be able to tell "nothing to analyze" apart from
+			// "the analyzer crashed", so exiting non-zero here would make the
+			// benign case indistinguishable from a broken run.
+			noLocalCode = true
+		case analyzeSARIF == "":
+			// The diff itself is unreadable (not a git repo / unresolvable
+			// base) and there are no external findings to merge.
 			return fmt.Errorf("no input provided: use --file, --dir, --sarif, or run in a git repo with changes")
 		}
-		// Otherwise: no diff code, but --sarif was given — proceed with no local
-		// files and let the SARIF merge below supply the findings. This is the
-		// multi-language path: a PR may touch no analyzable code yet still carry
-		// authoritative findings from an external scanner.
+		// With --sarif and no local code, the SARIF merge below supplies the
+		// findings. This is the multi-language path: a PR may touch no
+		// analyzable code yet still carry authoritative findings from an
+		// external scanner.
 	}
 
 	// If --ai-only, filter to files detected as AI-generated
@@ -188,6 +201,12 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	logx.Debugf("analyze: scanning %d file(s)", len(files))
 	result := analyzer.Analyze(opts)
 	logx.Debugf("analyze: found %d issue(s) across %d lines", len(result.Issues), result.TotalLines)
+	if noLocalCode {
+		// Say "there was no code" rather than "we analyzed code and found
+		// nothing" — the two are different facts and reports render both.
+		// A later SARIF merge overwrites this when external findings exist.
+		result.Summary = "No analyzable code in this change"
+	}
 
 	// Merge SARIF findings when --sarif is provided.
 	if analyzeSARIF != "" {
