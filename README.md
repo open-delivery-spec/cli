@@ -223,6 +223,34 @@ $ ods check --json
 | `--json` | `false` | JSON output |
 | `--sarif` | — | SARIF file whose findings are merged into the policy input |
 | `--ai-review` | — | AI review verdict file (`review-verdict/v1`); repeatable. Advisory: routes attention, never denies unless your policy opts in |
+| `--input` | — | Evaluate a prepared [`policy-input/v1`](https://github.com/open-delivery-spec/spec/blob/main/schemas/policy-input/v1.json) document instead of inspecting the working tree |
+
+#### Evaluating a prepared input: `--input`
+
+`--input` skips detect/analyze/score and evaluates a policy input you already
+have. It needs no repository, which is what makes the spec's
+[conformance scenarios](https://github.com/open-delivery-spec/spec/tree/main/spec/conformance)
+directly executable — each is a policy input plus a policy, with no working-tree
+state to reproduce:
+
+```bash
+$ ods check --input spec/conformance/auto-clean-ai-change/input.json \
+            --policy spec/conformance/auto-clean-ai-change/policy.rego --json
+{
+  "allowed": true,
+  "review_tier": "auto"
+}
+```
+
+Use it to check a policy against a scenario before shipping it, or when an
+external pipeline assembles the input itself and wants only the gate decision.
+A denial exits non-zero, as it does in the normal path.
+
+Because `--input` replaces input assembly, it cannot be combined with the flags
+that feed it (`--sarif`, `--ai-review`, `--mutation`, `--diff-base`); put those
+values in the input document instead. Fields the document omits are treated as
+**not measured** (the `-1` sentinel), not as a measured zero, so a policy guarded
+with `input.patch_coverage >= 0` stays quiet rather than reading absence as 0%.
 
 #### Disclosure completeness: `input.detection_sources`
 

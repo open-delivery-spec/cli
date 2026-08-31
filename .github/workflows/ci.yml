@@ -34,10 +34,13 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: "1.25"
+      # Two layers: internal/policy evaluates the Rego semantics directly,
+      # internal/e2e runs the same scenarios through the built binary to check
+      # the CLI contract (check-output JSON shape and the gating exit code).
       - name: Run conformance scenarios against this implementation
         env:
           ODS_CONFORMANCE_DIR: ${{ github.workspace }}/spec-repo/spec/conformance
-        run: go test ./internal/policy -run TestConformance -v
+        run: go test ./internal/policy ./internal/e2e -run TestConformance -v
 
   dogfood:
     name: Dogfood (test ODS on itself)
