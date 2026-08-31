@@ -19,6 +19,7 @@ var (
 	checkDiffBase   string
 	checkAIReviews  []string
 	checkMutation   string
+	checkInputFile  string
 )
 
 var checkCmd = &cobra.Command{
@@ -44,7 +45,8 @@ Place a policy at .ods/policy.rego:
 Examples:
   ods check                                    # use .ods/policy.rego or default
   ods check --policy .ods/policy.rego          # explicit policy file
-  ods check --json                             # JSON output`,
+  ods check --json                             # JSON output
+  ods check --input policy-input.json          # evaluate a prepared policy input`,
 	RunE: runCheck,
 }
 
@@ -60,9 +62,15 @@ func init() {
 		"AI review verdict file (ods.dev/review-verdict/v1); repeatable. Advisory by default: routes review attention, never denies unless your policy opts in")
 	checkCmd.Flags().StringVar(&checkMutation, "mutation", "",
 		"mutation-testing report (gremlins JSON) whose diff-scoped mutation score is fed to the policy input")
+	checkCmd.Flags().StringVar(&checkInputFile, "input", "",
+		"evaluate a prepared policy-input/v1 document instead of inspecting the working tree; makes the spec's conformance scenarios directly executable")
 }
 
 func runCheck(cmd *cobra.Command, args []string) error {
+	if checkInputFile != "" {
+		return runCheckOnPreparedInput(cmd)
+	}
+
 	// Resolve diff base: ODS_DIFF_BASE is set by validate-action to the PR base SHA.
 	// Prefer it over the hardcoded HEAD~1 so the full PR diff is analysed rather than
 	// only the most-recent commit.
@@ -132,6 +140,84 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		cmd.OutOrStdout().Write(data)
 		cmd.OutOrStdout().Write([]byte("\n"))
 	default:
+		printCheckResult(cmd, result, policyPath, useDefault)
+	}
+
+	if !result.Allowed {
+		cmd.SilenceUsage = true
+		return fmt.Errorf("policy denied: %d denial(s)", len(result.Denials))
+	}
+	return nil
+}
+
+// runCheckOnPreparedInput evaluates a policy against a policy-input/v1 document
+// read from disk instead of assembling one from the working tree.
+//
+// This is what makes the spec's conformance scenarios executable against any
+// implementation: each scenario is a policy input plus a policy, with no
+// repository state to reproduce. It is also the path an external pipeline takes
+// when it assembles the input itself and wants only the gate decision.
+func runCheckOnPreparedInput(cmd *cobra.Command) error {
+	// The pipeline flags feed input assembly, which --input replaces. Silently
+	// ignoring them would hide a real mistake, so name the conflict instead.
+	for _, conflict := range []struct {
+		name string
+		set  bool
+	}{
+		{"--sarif", checkSARIF != ""},
+		{"--mutation", checkMutation != ""},
+		{"--ai-review", len(checkAIReviews) > 0},
+		{"--diff-base", checkDiffBase != ""},
+	} {
+		if conflict.set {
+			cmd.SilenceUsage = true
+			return fmt.Errorf("%s cannot be combined with --input: it feeds the pipeline that --input replaces (put the value in the input document instead)", conflict.name)
+		}
+	}
+
+	data, err := os.ReadFile(checkInputFile)
+	if err != nil {
+		return fmt.Errorf("reading policy input %s: %w", checkInputFile, err)
+	}
+
+	// Pre-seed the "not measured" sentinels: a document that omits these fields
+	// means the signal was never measured, which is not the same as a measured
+	// zero. Policies guard with `>= 0`, so a zero value would read as 0% coverage.
+	evalInput := &policy.EvalInput{TestCoverage: -1, PatchCoverage: -1, MutationScore: -1}
+	if err := json.Unmarshal(data, evalInput); err != nil {
+		return fmt.Errorf("parsing policy input %s: %w", checkInputFile, err)
+	}
+
+	policyPath := checkPolicyFile
+	if policyPath == "" {
+		policyPath = policy.DiscoverRegoFile(".")
+	}
+	useDefault := policyPath == ""
+
+	logx.Debugf("check: evaluating prepared input %s (issues=%d ai_reviews=%d)",
+		checkInputFile, len(evalInput.Issues), len(evalInput.AIReviews))
+
+	var result *policy.EvalResult
+	if useDefault {
+		result, err = evaluateDefaultPolicy(evalInput)
+	} else {
+		result, err = policy.Evaluate(policyPath, evalInput)
+	}
+	if err != nil {
+		return fmt.Errorf("policy evaluation failed: %w", err)
+	}
+
+	logx.Debugf("check: policy result allowed=%t denials=%d warnings=%d review_tier=%q",
+		result.Allowed, len(result.Denials), len(result.Warnings), result.ReviewTier)
+
+	if checkJSON {
+		out, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return err
+		}
+		cmd.OutOrStdout().Write(out)
+		cmd.OutOrStdout().Write([]byte("\n"))
+	} else {
 		printCheckResult(cmd, result, policyPath, useDefault)
 	}
 

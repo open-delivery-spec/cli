@@ -677,3 +677,172 @@ func TestRootHelpListsEverySubcommand(t *testing.T) {
 		}
 	}
 }
+
+// ─── ods check --input ───────────────────────────────────────────
+
+// resetCheckInputFlags restores the check command's package-level flag state.
+func resetCheckInputFlags(t *testing.T) {
+	t.Helper()
+	t.Cleanup(func() {
+		checkInputFile, checkPolicyFile, checkJSON = "", "", false
+		checkSARIF, checkMutation, checkDiffBase = "", "", ""
+		checkAIReviews = nil
+	})
+}
+
+// TestRunCheck_InputSeedsNotMeasuredSentinels guards the trap in reading a
+// policy input from disk: an omitted coverage field means "not measured" (−1),
+// not a measured zero. Decoding into a zero-valued struct would silently turn
+// every unmeasured signal into 0%, firing coverage rules on changes that were
+// never measured.
+func TestRunCheck_InputSeedsNotMeasuredSentinels(t *testing.T) {
+	resetCheckInputFlags(t)
+	dir := t.TempDir()
+
+	inputPath := filepath.Join(dir, "input.json")
+	mustWrite(t, inputPath, `{
+  "ai_generated": true,
+  "ai_confidence": 0.9,
+  "technical_debt_delta": 0.2,
+  "issues": [],
+  "ai_files": [],
+  "changed_files": ["src/app.go"]
+}`)
+	// Each rule is guarded the way the spec requires; none may fire when the
+	// signal is absent from the document.
+	policyPath := filepath.Join(dir, "policy.rego")
+	mustWrite(t, policyPath, `package ods.policy
+default allow := true
+
+deny[msg] {
+    input.test_coverage >= 0
+    input.test_coverage < 0.5
+    msg := "test coverage below 50%"
+}
+
+deny[msg] {
+    input.patch_coverage >= 0
+    input.patch_coverage < 0.5
+    msg := "patch coverage below 50%"
+}
+
+deny[msg] {
+    input.mutation_score >= 0
+    input.mutation_score < 0.5
+    msg := "mutation score below 50%"
+}
+`)
+	checkInputFile = inputPath
+	checkPolicyFile = policyPath
+	checkJSON = true
+
+	c, buf := bufCmd()
+	if err := runCheck(c, nil); err != nil {
+		t.Fatalf("unmeasured signals must not deny: %v\noutput: %s", err, buf.String())
+	}
+	var res policy.EvalResult
+	if err := json.Unmarshal(buf.Bytes(), &res); err != nil {
+		t.Fatalf("check output not valid JSON: %v\n%s", err, buf.String())
+	}
+	if !res.Allowed {
+		t.Errorf("expected allowed=true, got denials %v", res.Denials)
+	}
+}
+
+// TestRunCheck_InputMeasuredZeroStillDenies is the other half: a document that
+// explicitly reports zero coverage is a measurement, and must still deny.
+func TestRunCheck_InputMeasuredZeroStillDenies(t *testing.T) {
+	resetCheckInputFlags(t)
+	dir := t.TempDir()
+
+	inputPath := filepath.Join(dir, "input.json")
+	mustWrite(t, inputPath, `{
+  "ai_generated": true,
+  "test_coverage": 0.0,
+  "issues": [],
+  "ai_files": [],
+  "changed_files": ["src/app.go"]
+}`)
+	policyPath := filepath.Join(dir, "policy.rego")
+	mustWrite(t, policyPath, `package ods.policy
+default allow := true
+
+deny[msg] {
+    input.test_coverage >= 0
+    input.test_coverage < 0.5
+    msg := "test coverage below 50%"
+}
+`)
+	checkInputFile = inputPath
+	checkPolicyFile = policyPath
+	checkJSON = true
+
+	c, buf := bufCmd()
+	if err := runCheck(c, nil); err == nil {
+		t.Fatalf("a measured 0%% coverage must deny; output: %s", buf.String())
+	}
+}
+
+// TestRunCheck_InputRejectsPipelineFlags proves the conflicting flags fail loudly
+// rather than being silently dropped.
+func TestRunCheck_InputRejectsPipelineFlags(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "input.json")
+	mustWrite(t, inputPath, `{"ai_generated": false, "issues": [], "ai_files": [], "changed_files": []}`)
+
+	cases := []struct {
+		name string
+		set  func()
+		want string
+	}{
+		{"sarif", func() { checkSARIF = "x.sarif" }, "--sarif"},
+		{"mutation", func() { checkMutation = "m.json" }, "--mutation"},
+		{"ai-review", func() { checkAIReviews = []string{"v.json"} }, "--ai-review"},
+		{"diff-base", func() { checkDiffBase = "main" }, "--diff-base"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resetCheckInputFlags(t)
+			checkInputFile = inputPath
+			tc.set()
+
+			c, _ := bufCmd()
+			err := runCheck(c, nil)
+			if err == nil {
+				t.Fatalf("expected %s to conflict with --input", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q should name %s", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestRunCheck_InputReportsBadDocument checks that an unreadable or malformed
+// input fails with a message naming the file, rather than evaluating garbage.
+func TestRunCheck_InputReportsBadDocument(t *testing.T) {
+	dir := t.TempDir()
+	broken := filepath.Join(dir, "broken.json")
+	mustWrite(t, broken, `{"ai_generated": `)
+
+	for _, tc := range []struct {
+		name, path, want string
+	}{
+		{"missing", filepath.Join(dir, "nope.json"), "reading policy input"},
+		{"malformed", broken, "parsing policy input"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetCheckInputFlags(t)
+			checkInputFile = tc.path
+
+			c, _ := bufCmd()
+			err := runCheck(c, nil)
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q should mention %q", err, tc.want)
+			}
+		})
+	}
+}
