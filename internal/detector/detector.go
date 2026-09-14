@@ -71,7 +71,7 @@ func Detect(opts Options) (*DetectionResult, error) {
 	}
 
 	// Source 1: Git commit trailers (AI-assisted: true, Co-Authored-By: Claude...)
-	commitEvidence := detectFromCommits(opts)
+	commitEvidence, aiCommits := detectFromCommits(opts)
 	result.Evidence = append(result.Evidence, commitEvidence...)
 	if len(commitEvidence) > 0 {
 		result.Sources = append(result.Sources, "commit-trailer")
@@ -115,12 +115,19 @@ func Detect(opts Options) (*DetectionResult, error) {
 		}
 	}
 
-	// Source 4: per-file AI line counts. git-ai's measured authorship wins
-	// over the statistical diff heuristics — never mix a measurement with a
-	// guess for the same quantity.
-	if gitaiAttr != nil && len(gitaiAttr.Files) > 0 {
+	// Source 4: per-file AI line counts, strongest provenance first — never
+	// mix a measurement with a guess for the same quantity:
+	//   1. git-ai's measured authorship;
+	//   2. the lines AI-attributed commits added (attested by the trailer);
+	//   3. the statistical diff heuristics, only when nothing attests the
+	//      change — running them next to a trailer would let them attribute
+	//      the human commits of a mixed change to AI.
+	switch {
+	case gitaiAttr != nil && len(gitaiAttr.Files) > 0:
 		result.Files = filesFromGitAI(gitaiAttr, opts.DiffBase)
-	} else {
+	case len(aiCommits) > 0:
+		result.Files = filesFromCommits(aiCommits, opts.DiffBase)
+	default:
 		fileDetections, diffEvidence := detectFromDiff(opts.DiffBase)
 		result.Files = fileDetections
 		result.Evidence = append(result.Evidence, diffEvidence...)
@@ -135,10 +142,22 @@ func Detect(opts Options) (*DetectionResult, error) {
 	return result, nil
 }
 
+// MaxConfidence caps the aggregate detection confidence. Attribution is
+// volunteered by tools and authors — a trailer, a disclosure, a branch name —
+// never proven, so ODS does not report certainty: 1.0 is never emitted, and
+// policies that threshold on ai_confidence should treat 0.95 as the ceiling.
+const MaxConfidence = 0.95
+
+// corroborationBoost is added once per additional *distinct* source. Five
+// attributed commits are one source saying the same thing, not five
+// independent witnesses; a trailer plus a PR-body disclosure are two.
+const corroborationBoost = 0.05
+
 // aggregate computes the overall detection verdict from collected evidence.
-// Uses max-confidence as the baseline with a small boost per additional corroborating
-// signal. This ensures that adding more positive signals never reduces overall
-// confidence (which a weighted average does when mixing high and low-confidence signals).
+// Uses max-confidence as the baseline with a small boost per additional
+// corroborating source. This ensures that adding more positive signals never
+// reduces overall confidence (which a weighted average does when mixing high
+// and low-confidence signals), while more of the same signal never inflates it.
 func (r *DetectionResult) aggregate() {
 	if len(r.Evidence) == 0 && len(r.Files) == 0 {
 		r.AIGenerated = false
@@ -149,10 +168,12 @@ func (r *DetectionResult) aggregate() {
 
 	// Use the highest individual signal confidence as the baseline.
 	maxConf := 0.0
+	sources := map[string]bool{}
 	for _, ev := range r.Evidence {
 		if ev.Confidence > maxConf {
 			maxConf = ev.Confidence
 		}
+		sources[ev.Source] = true
 	}
 	for _, f := range r.Files {
 		if f.Confidence > maxConf {
@@ -160,13 +181,11 @@ func (r *DetectionResult) aggregate() {
 		}
 	}
 
-	// Each additional corroborating signal adds a 5% boost (capped at 1.0).
-	extraSignals := len(r.Evidence) + len(r.Files) - 1
-	if extraSignals > 0 {
-		maxConf += 0.05 * float64(extraSignals)
-		if maxConf > 1.0 {
-			maxConf = 1.0
-		}
+	if extra := len(sources) - 1; extra > 0 {
+		maxConf += corroborationBoost * float64(extra)
+	}
+	if maxConf > MaxConfidence {
+		maxConf = MaxConfidence
 	}
 	r.Confidence = maxConf
 
@@ -294,12 +313,9 @@ type commitRecord struct {
 	message string
 }
 
-// filesFromGitAI converts git-ai's measured per-file AI line counts into
-// FileDetections. TotalLines comes from the diff's insertions per file (same
-// range as the rest of detection); AI lines are capped at the insertions so
-// authorship recorded on lines outside this change cannot inflate the ratio.
-// Files absent from the diff are skipped for the same reason.
-func filesFromGitAI(attr *gitai.RangeAttribution, base string) []FileDetection {
+// rangeInsertions returns, per path, the lines the range diff adds — the
+// denominator every per-file AI line count is capped at.
+func rangeInsertions(base string) map[string]int {
 	insertions := map[string]int{}
 	if out, err := gitOutput("diff", "--numstat", base); err == nil {
 		for _, line := range strings.Split(out, "\n") {
@@ -312,6 +328,73 @@ func filesFromGitAI(attr *gitai.RangeAttribution, base string) []FileDetection {
 			}
 		}
 	}
+	return insertions
+}
+
+// filesFromCommits derives per-file AI line counts from the commits that carry
+// an AI attribution trailer: the lines each such commit added to a code file,
+// capped at the file's insertions in the range diff so lines the change no
+// longer contains cannot inflate the ratio. This is commit-granular — a line
+// an AI-attributed commit added and a human later edited still counts as AI —
+// and attested rather than measured, so each file carries the trailer's
+// confidence. Non-code files are skipped: the ratio is over changed code
+// lines, the same denominator the scorer uses.
+func filesFromCommits(hashes []string, base string) []FileDetection {
+	insertions := rangeInsertions(base)
+
+	aiLines := map[string]int{}
+	for _, h := range hashes {
+		out, err := gitOutput("show", "--numstat", "--format=", h)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(out, "\n") {
+			fields := strings.Fields(line)
+			if len(fields) < 3 || !IsCodeFile(fields[2]) {
+				continue
+			}
+			if n, err := strconv.Atoi(fields[0]); err == nil { // "-" for binary
+				aiLines[fields[2]] += n
+			}
+		}
+	}
+
+	paths := make([]string, 0, len(aiLines))
+	for p := range aiLines {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	var files []FileDetection
+	for _, path := range paths {
+		total, changed := insertions[path]
+		if !changed || total == 0 {
+			continue
+		}
+		ai := aiLines[path]
+		if ai > total {
+			ai = total
+		}
+		if ai == 0 {
+			continue
+		}
+		files = append(files, FileDetection{
+			Path:       path,
+			AILines:    ai,
+			TotalLines: total,
+			Confidence: 0.9,
+		})
+	}
+	return files
+}
+
+// filesFromGitAI converts git-ai's measured per-file AI line counts into
+// FileDetections. TotalLines comes from the diff's insertions per file (same
+// range as the rest of detection); AI lines are capped at the insertions so
+// authorship recorded on lines outside this change cannot inflate the ratio.
+// Files absent from the diff are skipped for the same reason.
+func filesFromGitAI(attr *gitai.RangeAttribution, base string) []FileDetection {
+	insertions := rangeInsertions(base)
 
 	paths := make([]string, 0, len(attr.Files))
 	for p := range attr.Files {
@@ -340,6 +423,9 @@ func filesFromGitAI(attr *gitai.RangeAttribution, base string) []FileDetection {
 }
 
 // detectFromCommits checks the commits under review for AI-related trailers.
+// It returns one evidence row per attributed commit and the hashes of those
+// commits (empty for a message read from a file), which per-file attribution
+// uses to count the lines they added.
 //
 // The scan is scoped to DiffBase..HEAD: only commits that are part of the
 // change under review are attribution evidence for it. An unbounded
@@ -349,8 +435,9 @@ func filesFromGitAI(attr *gitai.RangeAttribution, base string) []FileDetection {
 // human PR would flag as AI-generated. MaxCommits stays as a cap; when the
 // base ref does not resolve (shallow clone, initial commit) the scan falls
 // back to the unscoped window rather than reporting nothing.
-func detectFromCommits(opts Options) []Evidence {
+func detectFromCommits(opts Options) ([]Evidence, []string) {
 	var evidence []Evidence
+	var aiCommits []string
 
 	// %x1e/%x1f: record/field separators that cannot appear in git hashes and
 	// are vanishingly unlikely in commit messages — no splitting heuristics.
@@ -447,10 +534,13 @@ func detectFromCommits(opts Options) []Evidence {
 				Value:      value,
 				Confidence: 0.9,
 			})
+			if rec.hash != "" {
+				aiCommits = append(aiCommits, rec.hash)
+			}
 		}
 	}
 
-	return evidence
+	return evidence, aiCommits
 }
 
 // knownAIToolBranchNames contains the first path segment used by AI coding tools
@@ -571,7 +661,7 @@ func detectFromDiff(base string) ([]FileDetection, []Evidence) {
 	// Filter to code files only
 	var codeFiles []string
 	for _, f := range changedFiles {
-		if isCodeFile(f) {
+		if IsCodeFile(f) {
 			codeFiles = append(codeFiles, f)
 		}
 	}
@@ -809,8 +899,11 @@ func extractAddedLines(diff string) []string {
 	return lines
 }
 
-// isCodeFile returns true if the file extension suggests a code file.
-func isCodeFile(path string) bool {
+// IsCodeFile returns true if the file extension suggests a code file. It is
+// the one definition of "code" the pipeline shares: per-file attribution, the
+// duplication estimate, and the analyzer's diff scope all filter with it, so
+// every ratio ODS reports has the same denominator.
+func IsCodeFile(path string) bool {
 	codeExts := map[string]bool{
 		".go": true, ".rs": true, ".py": true, ".js": true, ".ts": true,
 		".tsx": true, ".jsx": true, ".java": true, ".kt": true, ".swift": true,
