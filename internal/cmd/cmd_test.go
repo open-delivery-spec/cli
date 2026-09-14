@@ -189,26 +189,36 @@ func TestPrintAnalyzeDetail(t *testing.T) {
 func TestPrintScoreSummaryAndDetail(t *testing.T) {
 	res := &scorer.ScoreResult{
 		TechnicalDebtDelta: 2.5,
-		Verdict:            "neutral",
-		Recommendation:     "Moderate risk",
+		Verdict:            "increase",
+		Risk:               "moderate",
+		Recommendation:     "Review recommended",
 		Breakdown: scorer.ScoreBreakdown{
-			AICodeRatio: 0.5, DefectDensity: 1.0, CriticalIssues: 0,
+			AICodeRatio: 0.5, AICodeRatioSource: "commit-trailer", DefectDensity: 1.0, CriticalIssues: 0,
 			TestCoverage: 0.8, DuplicationRate: 0.1,
 		},
 	}
 
 	c, buf := bufCmd()
 	printScoreSummary(c, res)
-	if !strings.Contains(buf.String(), "neutral") {
-		t.Errorf("summary missing verdict: %s", buf.String())
+	for _, want := range []string{"increase", "moderate", "⚠️"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("summary missing %q: %s", want, buf.String())
+		}
 	}
 
 	c2, buf2 := bufCmd()
 	printScoreDetail(c2, res)
-	for _, want := range []string{"Technical Debt Score Report", "AI Code Ratio", "Test Coverage"} {
+	for _, want := range []string{"Technical Debt Score Report", "AI Code Ratio", "50% (source: commit-trailer)", "Risk:       moderate", "Test Coverage"} {
 		if !strings.Contains(buf2.String(), want) {
 			t.Errorf("detail missing %q\n%s", want, buf2.String())
 		}
+	}
+
+	c3, buf3 := bufCmd()
+	printScoreDetail(c3, &scorer.ScoreResult{Risk: "low", Verdict: "neutral",
+		Breakdown: scorer.ScoreBreakdown{AICodeRatioSource: "unknown", TestCoverage: -1}})
+	if !strings.Contains(buf3.String(), "AI Code Ratio:      N/A (not measured)") {
+		t.Errorf("detail should mark an unmeasured ratio N/A:\n%s", buf3.String())
 	}
 }
 

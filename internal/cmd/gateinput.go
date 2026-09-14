@@ -109,9 +109,9 @@ func assembleGateInputs(cmd *cobra.Command, diffBase, sarifPath string, aiReview
 		CoverageResult:    covInput,
 	})
 
-	logx.Debugf("check: score delta=%.2f verdict=%s (ai_ratio=%.2f defect_density=%.2f critical=%d coverage=%.2f dup=%.2f)",
-		scoreResult.TechnicalDebtDelta, scoreResult.Verdict,
-		scoreResult.Breakdown.AICodeRatio, scoreResult.Breakdown.DefectDensity,
+	logx.Debugf("check: score delta=%.2f verdict=%s risk=%s (ai_ratio=%.2f/%s defect_density=%.2f critical=%d coverage=%.2f dup=%.2f)",
+		scoreResult.TechnicalDebtDelta, scoreResult.Verdict, scoreResult.Risk,
+		scoreResult.Breakdown.AICodeRatio, scoreResult.Breakdown.AICodeRatioSource, scoreResult.Breakdown.DefectDensity,
 		scoreResult.Breakdown.CriticalIssues, scoreResult.Breakdown.TestCoverage,
 		scoreResult.Breakdown.DuplicationRate)
 
