@@ -5,6 +5,7 @@ package scorer
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"strings"
@@ -18,19 +19,21 @@ type ScoreResult struct {
 	PRNumber           int            `json:"pr_number,omitempty"`
 	TechnicalDebtDelta float64        `json:"technical_debt_delta"`
 	Breakdown          ScoreBreakdown `json:"breakdown"`
-	Verdict            string         `json:"verdict"` // "decrease", "neutral", "increase"
+	Verdict            string         `json:"verdict"` // direction of the delta: "increase", "neutral", "decrease"
+	Risk               string         `json:"risk"`    // band of the delta: "low", "moderate", "high", "critical"
 	Recommendation     string         `json:"recommendation"`
 	FilesAnalyzed      int            `json:"files_analyzed"`
 }
 
 // ScoreBreakdown provides the dimensional scores.
 type ScoreBreakdown struct {
-	AICodeRatio        float64 `json:"ai_code_ratio"`        // AI lines / total lines
+	AICodeRatio        float64 `json:"ai_code_ratio"`        // AI lines / total changed code lines
+	AICodeRatioSource  string  `json:"ai_code_ratio_source"` // git-ai/commit-trailer/diff-heuristics/unknown
 	DefectDensity      float64 `json:"defect_density"`       // high/critical issues per KLOC (informational — not part of the delta)
 	CriticalIssues     int     `json:"critical_issues"`      // critical + high severity
 	TestCoverage       float64 `json:"test_coverage"`        // fraction in [0,1] or -1 if not measured
 	TestCoverageSource string  `json:"test_coverage_source"` // go/lcov/cobertura/nyc/estimated/unknown
-	DuplicationRate    float64 `json:"duplication_rate"`     // estimated duplication
+	DuplicationRate    float64 `json:"duplication_rate"`     // estimated duplication among added code lines
 }
 
 // Options configures scoring behavior.
@@ -63,17 +66,19 @@ func Score(opts Options) *ScoreResult {
 
 	br := ScoreBreakdown{}
 
-	// Dimension 1: AI code ratio (AI lines / total)
-	if opts.TotalChangedLines > 0 && opts.DetectorResult != nil {
+	// Dimension 1: AI code ratio — AI lines / total changed code lines. The
+	// numerator is measured (git-ai notes), attested (the lines AI-attributed
+	// commits added), or estimated by the diff heuristics; it is never
+	// invented. No per-file data means no ratio — 0 with source "unknown" —
+	// not a number derived from the detection confidence.
+	br.AICodeRatioSource = "unknown"
+	if opts.TotalChangedLines > 0 && opts.DetectorResult != nil && len(opts.DetectorResult.Files) > 0 {
 		aiLines := 0
 		for _, f := range opts.DetectorResult.Files {
 			aiLines += f.AILines
 		}
-		if aiLines == 0 && opts.DetectorResult.AIGenerated {
-			// No file-level data but AI detected: estimate from confidence
-			aiLines = int(float64(opts.TotalChangedLines) * opts.DetectorResult.Confidence * 0.5)
-		}
-		br.AICodeRatio = float64(aiLines) / float64(opts.TotalChangedLines)
+		br.AICodeRatio = math.Min(1, float64(aiLines)/float64(opts.TotalChangedLines))
+		br.AICodeRatioSource = ratioSource(opts.DetectorResult.Sources)
 	}
 
 	// Dimension 2: Defect density using only high/critical issues per KLOC.
@@ -144,20 +149,32 @@ func Score(opts Options) *ScoreResult {
 	delta := qualityDebt * aiRiskMultiplier
 	result.TechnicalDebtDelta = delta
 
-	// Verdict
+	// Verdict is the direction of the delta, as the schema defines it: a
+	// positive delta is an increase however small. Risk is the band the delta
+	// falls in. The two used to be one field, which labelled +0.1 "decrease".
+	// "neutral" is a delta that rounds to 0.0, so the label never contradicts
+	// the one-decimal number printed next to it.
+	switch tenths := math.Round(delta * 10); {
+	case tenths > 0:
+		result.Verdict = "increase"
+	case tenths < 0:
+		result.Verdict = "decrease"
+	default:
+		result.Verdict = "neutral"
+	}
 	switch {
 	case delta <= 1.0:
-		result.Verdict = "decrease"
-		result.Recommendation = "Low risk — acceptable for merge"
+		result.Risk = "low"
+		result.Recommendation = "Acceptable for merge"
 	case delta <= 3.0:
-		result.Verdict = "neutral"
-		result.Recommendation = "Moderate risk — review recommended, ensure adequate tests"
+		result.Risk = "moderate"
+		result.Recommendation = "Review recommended, ensure adequate tests"
 	case delta <= 5.0:
-		result.Verdict = "increase"
-		result.Recommendation = "High risk — add tests and fix high/critical issues"
+		result.Risk = "high"
+		result.Recommendation = "Add tests and fix high/critical issues"
 	default:
-		result.Verdict = "increase"
-		result.Recommendation = "Block — critical technical debt increase. Fix high/critical issues and add test coverage before merge."
+		result.Risk = "critical"
+		result.Recommendation = "Fix high/critical issues and add test coverage before merge"
 	}
 
 	result.FilesAnalyzed = 0
@@ -172,15 +189,50 @@ func Score(opts Options) *ScoreResult {
 	return result
 }
 
-// estimateDuplication looks at git diff to estimate code duplication rate.
-// Reads ODS_DIFF_BASE from the environment (set by validate-action) so the
-// same diff range is used here as in the rest of the pipeline.
+// ratioSource names the provenance of the per-file AI line counts behind
+// ai_code_ratio, strongest first — the order in which the detector picks them.
+func ratioSource(sources []string) string {
+	has := map[string]bool{}
+	for _, s := range sources {
+		has[s] = true
+	}
+	switch {
+	case has["git-ai-notes"]:
+		return "git-ai"
+	case has["commit-trailer"]:
+		return "commit-trailer"
+	case has["diff-heuristics"]:
+		return "diff-heuristics"
+	}
+	return "unknown"
+}
+
+// estimateDuplication looks at the git diff to estimate the duplication rate
+// of the *code* the change adds. Reads ODS_DIFF_BASE from the environment (set
+// by validate-action) so the same diff range is used here as in the rest of
+// the pipeline. Non-code files are excluded: repeated table rows in a README
+// are not copy-pasted code, and a docs-only change has nothing to estimate.
 func estimateDuplication() float64 {
 	diffBase := os.Getenv("ODS_DIFF_BASE")
 	if diffBase == "" {
 		diffBase = "HEAD~1"
 	}
-	out, err := exec.Command("git", "diff", diffBase).Output()
+	names, err := exec.Command("git", "diff", "--name-only", diffBase).Output()
+	if err != nil {
+		return 0
+	}
+	var codeFiles []string
+	for _, name := range strings.Split(strings.TrimSpace(string(names)), "\n") {
+		name = strings.TrimSpace(name)
+		if name != "" && detector.IsCodeFile(name) {
+			codeFiles = append(codeFiles, name)
+		}
+	}
+	if len(codeFiles) == 0 {
+		return 0
+	}
+	args := append([]string{"diff", diffBase, "--"}, codeFiles...)
+	out, err := exec.Command("git", args...).Output()
 	if err != nil {
 		return 0
 	}
@@ -259,8 +311,9 @@ func (r *ScoreResult) FormatScore() string {
 		coverageStr = fmt.Sprintf("%.0f%%", b.TestCoverage*100)
 	}
 	return fmt.Sprintf(
-		"Tech Debt Delta: %+.1f | AI Ratio: %.0f%% | Defects: %.1f/KLOC | Critical: %d | Coverage: %s | Duplication: %.0f%%",
+		"Tech Debt Delta: %+.1f | Risk: %s | AI Ratio: %.0f%% | Defects: %.1f/KLOC | Critical: %d | Coverage: %s | Duplication: %.0f%%",
 		r.TechnicalDebtDelta,
+		r.Risk,
 		b.AICodeRatio*100,
 		b.DefectDensity,
 		b.CriticalIssues,

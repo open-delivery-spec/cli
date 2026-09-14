@@ -87,10 +87,17 @@ func runScore(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Count changed lines
+	// Count changed lines — the same denominator `ods check` uses: the added
+	// lines across every changed code file. Summing only the AI-detected
+	// files instead made any AI-touched change look 100% AI.
 	totalLines := 0
-	for _, f := range detectResult.Files {
-		totalLines += f.TotalLines
+	for _, lines := range diffFiles {
+		totalLines += len(lines)
+	}
+	if totalLines == 0 {
+		for _, f := range detectResult.Files {
+			totalLines += f.TotalLines
+		}
 	}
 	if totalLines == 0 && analyzeResult.TotalLines > 0 {
 		totalLines = analyzeResult.TotalLines
@@ -129,9 +136,9 @@ func runScore(cmd *cobra.Command, args []string) error {
 		CoverageResult:    covInput,
 	})
 
-	logx.Debugf("score: delta=%.2f verdict=%s (ai_ratio=%.2f defect_density=%.2f critical=%d coverage=%.2f dup=%.2f)",
-		scoreResult.TechnicalDebtDelta, scoreResult.Verdict,
-		scoreResult.Breakdown.AICodeRatio, scoreResult.Breakdown.DefectDensity,
+	logx.Debugf("score: delta=%.2f verdict=%s risk=%s (ai_ratio=%.2f/%s defect_density=%.2f critical=%d coverage=%.2f dup=%.2f)",
+		scoreResult.TechnicalDebtDelta, scoreResult.Verdict, scoreResult.Risk,
+		scoreResult.Breakdown.AICodeRatio, scoreResult.Breakdown.AICodeRatioSource, scoreResult.Breakdown.DefectDensity,
 		scoreResult.Breakdown.CriticalIssues, scoreResult.Breakdown.TestCoverage,
 		scoreResult.Breakdown.DuplicationRate)
 
@@ -152,36 +159,32 @@ func runScore(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func printScoreSummary(cmd *cobra.Command, r *scorer.ScoreResult) {
-	icon := "✅"
-	if r.Verdict == "increase" {
-		if r.TechnicalDebtDelta > 5.0 {
-			icon = "❌"
-		} else {
-			icon = "⚠️"
-		}
-	} else if r.Verdict == "neutral" {
-		icon = "⚠️"
+// riskIcon maps the score's risk band to the status icon. The icon follows the
+// band, not the verdict: a +0.1 delta is an "increase" and still low risk.
+func riskIcon(risk string) string {
+	switch risk {
+	case "critical":
+		return "❌"
+	case "high", "moderate":
+		return "⚠️"
 	}
+	return "✅"
+}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "%s  Technical Debt Score\n", icon)
+func printScoreSummary(cmd *cobra.Command, r *scorer.ScoreResult) {
+	fmt.Fprintf(cmd.OutOrStdout(), "%s  Technical Debt Score\n", riskIcon(r.Risk))
 	fmt.Fprintf(cmd.OutOrStdout(), "   %s\n", r.FormatScore())
-	fmt.Fprintf(cmd.OutOrStdout(), "   Verdict: %s (%s)\n", r.Verdict, r.Recommendation)
+	fmt.Fprintf(cmd.OutOrStdout(), "   Verdict: %s, %s risk (%s)\n", r.Verdict, r.Risk, r.Recommendation)
 }
 
 func printScoreDetail(cmd *cobra.Command, r *scorer.ScoreResult) {
 	b := r.Breakdown
-	icon := "✅"
-	if r.Verdict == "increase" {
-		icon = "❌"
-	} else if r.Verdict == "neutral" {
-		icon = "⚠️"
-	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "%s  Technical Debt Score Report\n", icon)
+	fmt.Fprintf(cmd.OutOrStdout(), "%s  Technical Debt Score Report\n", riskIcon(r.Risk))
 	fmt.Fprintln(cmd.OutOrStdout(), "────────────────────────────────────────────────────────────")
 	fmt.Fprintf(cmd.OutOrStdout(), "Delta:      %+.1f\n", r.TechnicalDebtDelta)
 	fmt.Fprintf(cmd.OutOrStdout(), "Verdict:    %s\n", r.Verdict)
+	fmt.Fprintf(cmd.OutOrStdout(), "Risk:       %s\n", r.Risk)
 	fmt.Fprintf(cmd.OutOrStdout(), "Recommendation: %s\n", r.Recommendation)
 	fmt.Fprintln(cmd.OutOrStdout())
 	fmt.Fprintln(cmd.OutOrStdout(), "Breakdown:")
@@ -189,7 +192,11 @@ func printScoreDetail(cmd *cobra.Command, r *scorer.ScoreResult) {
 	if b.TestCoverage >= 0 {
 		coverageStr = fmt.Sprintf("%.0f%% (source: %s)", b.TestCoverage*100, b.TestCoverageSource)
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "  AI Code Ratio:      %.0f%%\n", b.AICodeRatio*100)
+	ratioStr := "N/A (not measured)"
+	if b.AICodeRatioSource != "unknown" {
+		ratioStr = fmt.Sprintf("%.0f%% (source: %s)", b.AICodeRatio*100, b.AICodeRatioSource)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "  AI Code Ratio:      %s\n", ratioStr)
 	fmt.Fprintf(cmd.OutOrStdout(), "  Defect Density:     %.1f / KLOC\n", b.DefectDensity)
 	fmt.Fprintf(cmd.OutOrStdout(), "  Critical Issues:    %d\n", b.CriticalIssues)
 	fmt.Fprintf(cmd.OutOrStdout(), "  Test Coverage:      %s\n", coverageStr)

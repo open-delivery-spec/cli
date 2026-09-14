@@ -1,6 +1,13 @@
 package detector
 
-import "testing"
+import (
+	"math"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestDetectFromBranch_ai(t *testing.T) {
 	ev := detectFromBranch("ai-add-auth-feature")
@@ -236,9 +243,9 @@ func TestIsCodeFile(t *testing.T) {
 		{"image.png", false},
 	}
 	for _, tt := range tests {
-		got := isCodeFile(tt.path)
+		got := IsCodeFile(tt.path)
 		if got != tt.want {
-			t.Errorf("isCodeFile(%s) = %v, want %v", tt.path, got, tt.want)
+			t.Errorf("IsCodeFile(%s) = %v, want %v", tt.path, got, tt.want)
 		}
 	}
 }
@@ -298,6 +305,145 @@ func TestDetectionResult_aggregate(t *testing.T) {
 		}
 		if r.Confidence < 0.7 {
 			t.Errorf("confidence = %f, want >= 0.7", r.Confidence)
+		}
+	})
+
+	t.Run("a second source corroborates", func(t *testing.T) {
+		r := &DetectionResult{
+			Evidence: []Evidence{
+				{Source: "commit-trailer", Signal: "ai-footer", Confidence: 0.9},
+				{Source: "pr-body", Signal: "ai-disclosure-checkbox", Confidence: 0.85},
+			},
+		}
+		r.aggregate()
+		if math.Abs(r.Confidence-0.95) > 1e-9 {
+			t.Errorf("confidence = %f, want 0.95 (0.9 + one corroborating source)", r.Confidence)
+		}
+	})
+
+	t.Run("many commits from one source do not stack toward certainty", func(t *testing.T) {
+		// Five attributed commits are one source saying the same thing. Before
+		// the fix each one added 5%, and any multi-commit AI change reported
+		// 100% — a certainty ODS explicitly does not claim.
+		var ev []Evidence
+		for i := 0; i < 5; i++ {
+			ev = append(ev, Evidence{Source: "commit-trailer", Signal: "ai-footer", Confidence: 0.9})
+		}
+		r := &DetectionResult{Evidence: ev}
+		r.aggregate()
+		if math.Abs(r.Confidence-0.9) > 1e-9 {
+			t.Errorf("confidence = %f, want 0.9 (one source, however many commits)", r.Confidence)
+		}
+	})
+
+	t.Run("never reports certainty", func(t *testing.T) {
+		r := &DetectionResult{
+			Evidence: []Evidence{
+				{Source: "git-ai-notes", Signal: "authorship-log", Confidence: 0.95},
+				{Source: "commit-trailer", Signal: "ai-footer", Confidence: 0.9},
+				{Source: "pr-body", Signal: "ai-disclosure-checkbox", Confidence: 0.85},
+				{Source: "branch-name", Signal: "ai-tool-branch", Confidence: 0.6},
+			},
+			Files: []FileDetection{{Path: "a.go", AILines: 10, TotalLines: 10, Confidence: 0.95}},
+		}
+		r.aggregate()
+		if r.Confidence > MaxConfidence {
+			t.Errorf("confidence = %f, want <= %v: attribution is volunteered, never proven", r.Confidence, MaxConfidence)
+		}
+		if r.Confidence < 0.95 {
+			t.Errorf("confidence = %f, want the cap when every source agrees", r.Confidence)
+		}
+	})
+}
+
+// gitIn runs a git command in dir with a fixed identity and fails the test on error.
+func gitIn(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func writeIn(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+}
+
+// TestFilesFromCommits covers the attested per-file AI line counts: the lines
+// AI-attributed commits added to code files, capped at what the change still
+// contains, with human commits and non-code files left out.
+func TestFilesFromCommits(t *testing.T) {
+	dir := t.TempDir()
+	gitIn(t, dir, "init", "-q", "-b", "main")
+	writeIn(t, dir, "README.md", "# fixture\n")
+	gitIn(t, dir, "add", ".")
+	gitIn(t, dir, "commit", "-q", "-m", "chore: init")
+	base := gitIn(t, dir, "rev-parse", "HEAD")
+
+	// A human commit adds code that must not be attributed to AI.
+	writeIn(t, dir, "human.go", "package p\n\nfunc A() {}\n")
+	gitIn(t, dir, "add", ".")
+	gitIn(t, dir, "commit", "-q", "-m", "feat: human part")
+
+	// An AI-attributed commit adds five code lines and a docs file.
+	writeIn(t, dir, "ai.go", "package p\n\nfunc B() {}\n\nfunc C() {}\n")
+	writeIn(t, dir, "notes.md", "one\ntwo\n")
+	gitIn(t, dir, "add", ".")
+	gitIn(t, dir, "commit", "-q", "-m", "feat: ai part\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
+	aiHash := gitIn(t, dir, "rev-parse", "--short", "HEAD")
+
+	t.Chdir(dir)
+
+	t.Run("counts only the code lines the attributed commit added", func(t *testing.T) {
+		files := filesFromCommits([]string{aiHash}, base)
+		if len(files) != 1 || files[0].Path != "ai.go" {
+			t.Fatalf("files = %+v, want only ai.go", files)
+		}
+		if files[0].AILines != 5 || files[0].TotalLines != 5 {
+			t.Errorf("ai.go = %d/%d lines, want 5/5", files[0].AILines, files[0].TotalLines)
+		}
+		if files[0].Confidence != 0.9 {
+			t.Errorf("confidence = %v, want the trailer's 0.9 (attested, not measured)", files[0].Confidence)
+		}
+	})
+
+	t.Run("detect prefers attested counts over heuristics", func(t *testing.T) {
+		res, err := Detect(Options{DiffBase: base, MaxCommits: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Files) != 1 || res.Files[0].Path != "ai.go" || res.Files[0].AILines != 5 {
+			t.Errorf("files = %+v, want ai.go with 5 attested AI lines", res.Files)
+		}
+		for _, s := range res.Sources {
+			if s == "diff-heuristics" {
+				t.Errorf("sources = %v: heuristics must not run next to a trailer", res.Sources)
+			}
+		}
+		if res.Confidence > MaxConfidence {
+			t.Errorf("confidence = %v, want <= %v", res.Confidence, MaxConfidence)
+		}
+	})
+
+	t.Run("caps at what the change still contains", func(t *testing.T) {
+		// A later human commit trims the AI file to two lines: the range diff
+		// adds two, so the attributed count cannot exceed two.
+		writeIn(t, dir, "ai.go", "package p\n\nfunc B() {}\n")
+		gitIn(t, dir, "add", ".")
+		gitIn(t, dir, "commit", "-q", "-m", "refactor: trim")
+		files := filesFromCommits([]string{aiHash}, base)
+		if len(files) != 1 || files[0].AILines != 3 || files[0].TotalLines != 3 {
+			t.Errorf("files = %+v, want ai.go capped at 3/3", files)
 		}
 	})
 }

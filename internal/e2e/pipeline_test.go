@@ -171,6 +171,63 @@ func TestPipeline_HumanCode(t *testing.T) {
 	})
 }
 
+// TestPipeline_DocsOnlyAIChange: an attributed change that touches no code
+// reports no code numbers — no invented AI ratio, no duplication estimated
+// from repeated Markdown, and a confidence that is not certainty.
+func TestPipeline_DocsOnlyAIChange(t *testing.T) {
+	dir := initRepo(t)
+	rows := strings.Repeat("| a table row that repeats itself | yes |\n", 4)
+	writeFile(t, dir, "docs/guide.md", "# Guide\n\n"+rows)
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-m", "docs: add guide\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
+
+	t.Run("detect attests the change without per-file code counts", func(t *testing.T) {
+		out, _ := runODS(t, dir, "detect", "--branch", "claude/guide", "--json")
+		var res struct {
+			AIGenerated bool     `json:"ai_generated"`
+			Confidence  float64  `json:"confidence"`
+			Sources     []string `json:"sources"`
+			Files       []any    `json:"files"`
+		}
+		mustJSON(t, out, &res)
+		if !res.AIGenerated {
+			t.Fatalf("ai_generated = false, want true")
+		}
+		if res.Confidence > 0.95 {
+			t.Errorf("confidence = %v, want <= 0.95", res.Confidence)
+		}
+		if len(res.Files) != 0 {
+			t.Errorf("files = %v, want none for a docs-only change", res.Files)
+		}
+		if contains(res.Sources, "diff-heuristics") {
+			t.Errorf("sources = %v: heuristics must not run next to a trailer", res.Sources)
+		}
+	})
+
+	t.Run("score reports nothing it did not measure", func(t *testing.T) {
+		out, _ := runODS(t, dir, "score", "--json")
+		var res struct {
+			Verdict   string `json:"verdict"`
+			Risk      string `json:"risk"`
+			Breakdown struct {
+				AICodeRatio       float64 `json:"ai_code_ratio"`
+				AICodeRatioSource string  `json:"ai_code_ratio_source"`
+				DuplicationRate   float64 `json:"duplication_rate"`
+			} `json:"breakdown"`
+		}
+		mustJSON(t, out, &res)
+		if res.Breakdown.AICodeRatio != 0 || res.Breakdown.AICodeRatioSource != "unknown" {
+			t.Errorf("ai_code_ratio = %v (%s), want 0 / unknown", res.Breakdown.AICodeRatio, res.Breakdown.AICodeRatioSource)
+		}
+		if res.Breakdown.DuplicationRate != 0 {
+			t.Errorf("duplication_rate = %v, want 0: repeated Markdown rows are not duplicated code", res.Breakdown.DuplicationRate)
+		}
+		if res.Verdict != "neutral" || res.Risk != "low" {
+			t.Errorf("verdict = %q risk = %q, want neutral / low for a change with no debt", res.Verdict, res.Risk)
+		}
+	})
+}
+
 func TestPipeline_AICode(t *testing.T) {
 	dir := initRepo(t)
 	writeFile(t, dir, "widget.go", overCommentedGo)
@@ -192,6 +249,9 @@ func TestPipeline_AICode(t *testing.T) {
 		}
 		if res.Confidence <= 0 {
 			t.Errorf("confidence = %v, want > 0", res.Confidence)
+		}
+		if res.Confidence > 0.95 {
+			t.Errorf("confidence = %v, want <= 0.95: attribution is volunteered, never proven", res.Confidence)
 		}
 		if !contains(res.Sources, "commit-trailer") {
 			t.Errorf("sources = %v, want to include commit-trailer", res.Sources)
@@ -217,10 +277,23 @@ func TestPipeline_AICode(t *testing.T) {
 		var res struct {
 			TechnicalDebtDelta float64 `json:"technical_debt_delta"`
 			Verdict            string  `json:"verdict"`
+			Risk               string  `json:"risk"`
+			Breakdown          struct {
+				AICodeRatio       float64 `json:"ai_code_ratio"`
+				AICodeRatioSource string  `json:"ai_code_ratio_source"`
+			} `json:"breakdown"`
 		}
 		mustJSON(t, out, &res)
 		if res.Verdict == "" {
 			t.Errorf("verdict is empty, want a value")
+		}
+		if res.Risk == "" {
+			t.Errorf("risk is empty, want a value")
+		}
+		// Every changed code line came from the attributed commit, and the
+		// ratio says where that number comes from.
+		if res.Breakdown.AICodeRatio != 1 || res.Breakdown.AICodeRatioSource != "commit-trailer" {
+			t.Errorf("ai_code_ratio = %v (%s), want 1 from commit-trailer", res.Breakdown.AICodeRatio, res.Breakdown.AICodeRatioSource)
 		}
 	})
 

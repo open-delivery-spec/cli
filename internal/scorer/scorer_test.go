@@ -2,6 +2,9 @@ package scorer
 
 import (
 	"math"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -24,8 +27,8 @@ func TestScoreLowRisk(t *testing.T) {
 		TotalChangedLines: 100,
 	})
 
-	if result.Verdict != "decrease" {
-		t.Errorf("verdict = %s, want decrease", result.Verdict)
+	if result.Risk != "low" {
+		t.Errorf("risk = %s, want low", result.Risk)
 	}
 	if result.TechnicalDebtDelta > 1.0 {
 		t.Errorf("delta = %f, want <= 1.0 for low-risk", result.TechnicalDebtDelta)
@@ -55,6 +58,9 @@ func TestScoreHighRisk(t *testing.T) {
 
 	if result.Verdict != "increase" {
 		t.Errorf("verdict = %s, want increase", result.Verdict)
+	}
+	if result.Risk != "high" && result.Risk != "critical" {
+		t.Errorf("risk = %s, want high or critical", result.Risk)
 	}
 	if result.TechnicalDebtDelta < 3.0 {
 		t.Errorf("delta = %f, want >= 3.0 for high-risk", result.TechnicalDebtDelta)
@@ -147,9 +153,101 @@ func TestScore_CleanAIPRIsLowRisk(t *testing.T) {
 	if res.Breakdown.AICodeRatio != 1.0 {
 		t.Fatalf("AI ratio = %f, want 1.0", res.Breakdown.AICodeRatio)
 	}
-	if res.Verdict != "decrease" {
-		t.Errorf("clean 100%% AI PR should be low risk, got verdict %q (delta %f)",
-			res.Verdict, res.TechnicalDebtDelta)
+	if res.Risk != "low" {
+		t.Errorf("clean 100%% AI PR should be low risk, got risk %q (delta %f)",
+			res.Risk, res.TechnicalDebtDelta)
+	}
+}
+
+// TestScore_NoFileDataIsNotGuessed locks the fix for the invented AI ratio:
+// with no per-file attribution the scorer used to report
+// changed_lines × confidence × 0.5 — "49%" for a change whose every commit
+// was attested AI. No data means no ratio, marked as not measured.
+func TestScore_NoFileDataIsNotGuessed(t *testing.T) {
+	t.Setenv("ODS_DIFF_BASE", "HEAD")
+	res := Score(Options{
+		DetectorResult:    &detector.DetectionResult{AIGenerated: true, Confidence: 1.0, Sources: []string{"commit-trailer"}},
+		AnalyzerResult:    &analyzer.AnalysisResult{TotalLines: 100},
+		TotalChangedLines: 100,
+	})
+	if res.Breakdown.AICodeRatio != 0 {
+		t.Errorf("AI ratio = %f, want 0: nothing measured means nothing reported", res.Breakdown.AICodeRatio)
+	}
+	if res.Breakdown.AICodeRatioSource != "unknown" {
+		t.Errorf("ratio source = %q, want unknown", res.Breakdown.AICodeRatioSource)
+	}
+}
+
+// TestScore_RatioSourceFollowsDetector: the ratio carries the provenance of
+// the per-file counts it was computed from, strongest source first, and is
+// capped at 1 so a denominator narrower than the numerator cannot exceed it.
+func TestScore_RatioSourceFollowsDetector(t *testing.T) {
+	t.Setenv("ODS_DIFF_BASE", "HEAD")
+	mk := func(sources ...string) *ScoreResult {
+		return Score(Options{
+			DetectorResult: &detector.DetectionResult{
+				AIGenerated: true, Confidence: 0.9, Sources: sources,
+				Files: []detector.FileDetection{{Path: "a.go", AILines: 150, TotalLines: 150, Confidence: 0.9}},
+			},
+			AnalyzerResult:    &analyzer.AnalysisResult{TotalLines: 100},
+			TotalChangedLines: 100,
+		})
+	}
+	cases := []struct {
+		sources []string
+		want    string
+	}{
+		{[]string{"commit-trailer", "branch-name"}, "commit-trailer"},
+		{[]string{"git-ai-notes", "commit-trailer"}, "git-ai"},
+		{[]string{"branch-name", "diff-heuristics"}, "diff-heuristics"},
+		{[]string{"pr-body"}, "unknown"},
+	}
+	for _, c := range cases {
+		res := mk(c.sources...)
+		if res.Breakdown.AICodeRatioSource != c.want {
+			t.Errorf("sources %v: ratio source = %q, want %q", c.sources, res.Breakdown.AICodeRatioSource, c.want)
+		}
+		if res.Breakdown.AICodeRatio != 1 {
+			t.Errorf("sources %v: ratio = %f, want capped at 1", c.sources, res.Breakdown.AICodeRatio)
+		}
+	}
+}
+
+// TestScore_VerdictIsDirectionRiskIsBand: verdict says which way the delta
+// points, risk says how far. +0.1 used to be labelled "decrease".
+func TestScore_VerdictIsDirectionRiskIsBand(t *testing.T) {
+	t.Setenv("ODS_DIFF_BASE", "HEAD") // zero duplication, deterministic
+	mk := func(testLines int, issues []analyzer.Issue) *ScoreResult {
+		return Score(Options{
+			DetectorResult:    &detector.DetectionResult{},
+			AnalyzerResult:    &analyzer.AnalysisResult{TotalLines: 100, Issues: issues},
+			TestLines:         testLines,
+			TotalChangedLines: 100,
+		})
+	}
+	high := func(n int) []analyzer.Issue {
+		var iss []analyzer.Issue
+		for i := 0; i < n; i++ {
+			iss = append(iss, analyzer.Issue{Rule: "t", Severity: "high", Line: i + 1})
+		}
+		return iss
+	}
+	cases := []struct {
+		name          string
+		res           *ScoreResult
+		verdict, risk string
+	}{
+		{"fully covered, no issues → +0.0", mk(100, nil), "neutral", "low"},
+		{"90% coverage → +0.1 is an increase, still low risk", mk(90, nil), "increase", "low"},
+		{"one high finding + gap → moderate", mk(50, high(1)), "increase", "moderate"},
+		{"three high findings → high", mk(100, high(3)), "increase", "high"},
+		{"four high findings → critical", mk(100, high(4)), "increase", "critical"},
+	}
+	for _, c := range cases {
+		if c.res.Verdict != c.verdict || c.res.Risk != c.risk {
+			t.Errorf("%s: verdict=%q risk=%q (delta %.2f), want verdict=%q risk=%q",
+				c.name, c.res.Verdict, c.res.Risk, c.res.TechnicalDebtDelta, c.verdict, c.risk)
+		}
 	}
 }
 
@@ -222,6 +320,53 @@ func TestEstimateDuplication(t *testing.T) {
 	// Should return a number between 0 and 1 (or 0 if no git repo)
 	if rate < 0 || rate > 1 {
 		t.Errorf("duplication rate = %f, want 0.0-1.0", rate)
+	}
+}
+
+// gitIn runs a git command in dir with a fixed identity and fails the test on error.
+func gitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+}
+
+// TestEstimateDuplication_codeFilesOnly: repeated lines in a README are not
+// copy-pasted code. A docs-only change estimates 0; the same repetition in a
+// code file counts.
+func TestEstimateDuplication_codeFilesOnly(t *testing.T) {
+	dir := t.TempDir()
+	gitIn(t, dir, "init", "-q", "-b", "main")
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, dir, "add", ".")
+	gitIn(t, dir, "commit", "-q", "-m", "chore: init")
+	t.Chdir(dir)
+	t.Setenv("ODS_DIFF_BASE", "HEAD")
+
+	repeated := strings.Repeat("| a table row that repeats itself | yes |\n", 4)
+	if err := os.WriteFile(filepath.Join(dir, "notes.md"), []byte(repeated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, dir, "add", ".")
+	if rate := estimateDuplication(); rate != 0 {
+		t.Errorf("docs-only change: duplication = %f, want 0", rate)
+	}
+
+	code := "package p\n\n" + strings.Repeat("\tcallSomething(withArgument)\n", 4)
+	if err := os.WriteFile(filepath.Join(dir, "dup.go"), []byte(code), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, dir, "add", ".")
+	if rate := estimateDuplication(); rate <= 0 {
+		t.Errorf("repeated code lines: duplication = %f, want > 0", rate)
 	}
 }
 

@@ -76,7 +76,7 @@ parses the agent (`Claude`) and model version (`claude-3-opus`) into the evidenc
 
 Repos using [git-ai](https://github.com/git-ai-project/git-ai) get the highest-fidelity signal: its authorship logs under `refs/notes/ai` (Git AI Standard v3) record **which lines** each agent wrote. When notes are present on commits in the diff range, per-file AI line counts are *measured* from them instead of estimated by the diff heuristics, and the evidence names the agent and model (`AI-assisted commit a1b2c3d (git-ai: 6 AI line(s), cursor/claude-sonnet-4-5)`). AI lines are capped at each file's changed lines so authorship recorded outside the change can't inflate the ratio. Nothing changes on repos without git-ai. Note for CI: git notes aren't fetched by default — run `git fetch origin +refs/notes/ai:refs/notes/ai` after checkout.
 
-This is attribution from signals the tools (or authors) volunteer, not forensic detection: stripping the trailer evades it, and the diff heuristics are only a low-confidence fallback.
+This is attribution from signals the tools (or authors) volunteer, not forensic detection: stripping the trailer evades it, and the diff heuristics are only a low-confidence fallback. The aggregate confidence is the strongest signal plus 5% per additional independent source — five attributed commits are one source, not five — and it is capped at 95%: ODS never reports certainty about authorship.
 
 ```bash
 $ ods detect --diff-base origin/main --branch feature/ai-oauth
@@ -173,8 +173,8 @@ analyzing those files and skipping non-code ones — the entry point the pre-com
 ```bash
 $ ods score
 ⚠️  Technical Debt Score
-   +4.2 (increase)
-   Verdict: increase (Moderate risk: review recommended, ensure adequate tests)
+   Tech Debt Delta: +4.2 | Risk: high | AI Ratio: 75% | Defects: 1.2/KLOC | Critical: 0 | Coverage: 30% | Duplication: 10%
+   Verdict: increase, high risk (Add tests and fix high/critical issues)
 ```
 
 ```bash
@@ -182,9 +182,11 @@ $ ods score --json
 {
   "technical_debt_delta": 4.2,
   "verdict": "increase",
-  "recommendation": "Moderate risk: review recommended, ensure adequate tests",
+  "risk": "high",
+  "recommendation": "Add tests and fix high/critical issues",
   "breakdown": {
     "ai_code_ratio": 0.75,
+    "ai_code_ratio_source": "commit-trailer",
     "defect_density": 1.2,
     "critical_issues": 0,
     "test_coverage": 0.3,
@@ -192,6 +194,20 @@ $ ods score --json
   }
 }
 ```
+
+`verdict` is the direction of the delta — `increase`, `decrease`, or `neutral`
+for a delta that rounds to 0.0 — and `risk` is the band it falls in: `low`
+(≤ 1.0), `moderate` (≤ 3.0), `high` (≤ 5.0), `critical` (above). The two are
+separate on purpose: a +0.1 delta is an increase and low risk.
+
+`ai_code_ratio` is AI lines over the change's added *code* lines, and
+`ai_code_ratio_source` says where the numerator comes from: `git-ai`
+(measured from authorship notes), `commit-trailer` (the code lines each
+AI-attributed commit added, capped at what the change still contains),
+`diff-heuristics` (estimated), or `unknown` — no per-file attribution exists,
+so the ratio is 0 and nothing is claimed rather than a number invented from
+the detection confidence. `duplication_rate` is estimated over added code
+lines only; repeated Markdown or YAML lines do not count.
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -640,7 +656,7 @@ $ ods check --json --debug
 [ods:debug] check: detection ai_generated=true confidence=0.90 sources=[commit-trailer]
 [ods:debug] check: analysis issues=0 (changed lines=2, test lines=0)
 [ods:debug] check: coverage source=unknown value=-1.00
-[ods:debug] check: score delta=0.00 verdict=decrease (ai_ratio=0.00 ...)
+[ods:debug] check: score delta=0.00 verdict=neutral risk=low (ai_ratio=0.00/unknown ...)
 [ods:debug] check: policy result allowed=true denials=0 warnings=0
 {
   "allowed": true

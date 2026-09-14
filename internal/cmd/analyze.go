@@ -466,21 +466,11 @@ func extractAdded(diff []byte) []string {
 	return lines
 }
 
+// isCodeFileExt is the pipeline-wide definition of "code file" — one list, so
+// the analyzer's scope, the AI ratio, and the duplication estimate agree on
+// which lines count.
 func isCodeFileExt(path string) bool {
-	codeExts := map[string]bool{
-		".go": true, ".rs": true, ".py": true, ".js": true, ".ts": true,
-		".tsx": true, ".jsx": true, ".java": true, ".kt": true, ".swift": true,
-		".c": true, ".cpp": true, ".h": true, ".hpp": true, ".cs": true,
-		".rb": true, ".php": true, ".scala": true, ".clj": true, ".ex": true,
-		".exs": true, ".elm": true, ".hs": true, ".ml": true, ".mli": true,
-		".vue": true, ".svelte": true,
-	}
-	for ext := range codeExts {
-		if strings.HasSuffix(strings.ToLower(path), ext) {
-			return true
-		}
-	}
-	return false
+	return detector.IsCodeFile(path)
 }
 
 // readDir reads all code files in a directory recursively.
