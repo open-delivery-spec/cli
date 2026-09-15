@@ -228,6 +228,62 @@ func TestPipeline_DocsOnlyAIChange(t *testing.T) {
 	})
 }
 
+// TestPipeline_ReportMerge: per-repository reports merge into one
+// organization view, with the repository named from the flag or the remote.
+func TestPipeline_ReportMerge(t *testing.T) {
+	repoA := initRepo(t)
+	writeFile(t, repoA, "a.go", "package a\n\nfunc A() {}\n")
+	git(t, repoA, "add", ".")
+	git(t, repoA, "commit", "-m", "feat: a\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
+
+	repoB := initRepo(t)
+	writeFile(t, repoB, "b.go", "package b\n\nfunc B() {}\n")
+	git(t, repoB, "add", ".")
+	git(t, repoB, "commit", "-m", "feat: b (by hand)")
+	git(t, repoB, "remote", "add", "origin", "https://github.com/example-org/repo-b.git")
+
+	out := t.TempDir()
+	reportA, _ := runODS(t, repoA, "report", "--json", "--repo", "example-org/repo-a")
+	reportB, _ := runODS(t, repoB, "report", "--json") // name comes from the remote
+	writeFile(t, out, "a.json", reportA)
+	writeFile(t, out, "b.json", reportB)
+
+	var single struct {
+		Repo string `json:"repo"`
+	}
+	mustJSON(t, reportB, &single)
+	if single.Repo != "example-org/repo-b" {
+		t.Errorf("repo from remote = %q, want example-org/repo-b", single.Repo)
+	}
+
+	merged, exit := runODS(t, out, "report", "merge", filepath.Join(out, "a.json"), filepath.Join(out, "b.json"), "--json")
+	if exit != 0 {
+		t.Fatalf("report merge exit = %d\n%s", exit, merged)
+	}
+	var org struct {
+		ReposCovered int `json:"repos_covered"`
+		ReposWithAI  int `json:"repos_with_ai"`
+		TotalCommits int `json:"total_commits"`
+		AICommits    int `json:"ai_commits"`
+		Repos        []struct {
+			Repo string `json:"repo"`
+		} `json:"repos"`
+	}
+	mustJSON(t, merged, &org)
+	// Each fixture has the initial human commit plus one more.
+	if org.ReposCovered != 2 || org.ReposWithAI != 1 || org.TotalCommits != 4 || org.AICommits != 1 {
+		t.Errorf("merged = %+v, want 2 repos, 1 with AI, 4 commits, 1 AI", org)
+	}
+	if len(org.Repos) != 2 || org.Repos[0].Repo != "example-org/repo-a" {
+		t.Errorf("repos = %+v, want repo-a (the AI-heavier one) first", org.Repos)
+	}
+
+	md, _ := runODS(t, out, "report", "merge", filepath.Join(out, "a.json"), filepath.Join(out, "b.json"), "--markdown", "-")
+	if !strings.Contains(md, "| example-org/repo-a |") || !strings.Contains(md, "| Repositories | 2 scanned") {
+		t.Errorf("markdown summary missing the repository table:\n%s", md)
+	}
+}
+
 func TestPipeline_AICode(t *testing.T) {
 	dir := initRepo(t)
 	writeFile(t, dir, "widget.go", overCommentedGo)

@@ -171,3 +171,42 @@ func TestParseChurn_skipsBinary(t *testing.T) {
 		t.Errorf("churn[a] = %v, want [7 3]", m["a"])
 	}
 }
+
+func TestRepoNameFromRemote(t *testing.T) {
+	cases := map[string]string{
+		"https://github.com/open-delivery-spec/cli.git":         "open-delivery-spec/cli",
+		"https://github.com/open-delivery-spec/cli":             "open-delivery-spec/cli",
+		"https://x-access-token:secret@github.com/org/repo.git": "org/repo", // credentials never reach the report
+		"ssh://git@github.com/org/repo.git":                     "org/repo",
+		"git@github.com:org/repo.git":                           "org/repo",
+		"git@gitlab.example.com:group/subgroup/repo.git":        "subgroup/repo",
+		"https://gitlab.example.com/group/subgroup/repo":        "subgroup/repo",
+		"/srv/git/org/repo.git":                                 "org/repo",
+		"repo":                                                  "repo",
+		"":                                                      "",
+		"https://github.com":                                    "",
+	}
+	for in, want := range cases {
+		if got := repoNameFromRemote(in); got != want {
+			t.Errorf("repoNameFromRemote(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestAggregate_recordsBucketGranularity(t *testing.T) {
+	short := Aggregate([]Commit{
+		{Hash: "a", Date: mustTime("2026-07-06")}, {Hash: "b", Date: mustTime("2026-07-20")},
+	}, "30 days ago")
+	if short.BucketGranularity != "week" {
+		t.Errorf("short span granularity = %q, want week", short.BucketGranularity)
+	}
+	long := Aggregate([]Commit{
+		{Hash: "a", Date: mustTime("2026-01-15")}, {Hash: "b", Date: mustTime("2026-08-20")},
+	}, "1 year ago")
+	if long.BucketGranularity != "month" {
+		t.Errorf("long span granularity = %q, want month", long.BucketGranularity)
+	}
+	if undated := Aggregate([]Commit{{Hash: "a"}}, "x"); undated.BucketGranularity != "" {
+		t.Errorf("undated commits granularity = %q, want empty", undated.BucketGranularity)
+	}
+}
