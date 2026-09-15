@@ -636,10 +636,49 @@ ods report --since "1 year ago" --html ai-report.html
 | `--max-commits` | `0` | Cap commits scanned (0 = no cap) |
 | `--json` | `false` | Machine-readable output (commit/line shares, per-tool counts) |
 | `--html` | — | Write a self-contained HTML dashboard to this path (`-` for stdout) |
+| `--repo` | from the origin remote | Repository name recorded in the report (`owner/name`), so merged reports can be told apart |
 
 This is attribution, not forensic detection: it counts what the tools disclose.
 Coverage/quality history is not reconstructable from git alone, so the report
 focuses on the signals git carries reliably — AI share of commits and churn.
+
+#### Organization-wide: `ods report merge`
+
+One repository answers "how much of *this* project is AI-assisted". The
+organization question — across every repository, by tool, trending which
+way — is the same numbers summed. Run `ods report --json` in each
+repository (a scheduled workflow, a laptop, any CI) and merge the files:
+
+```bash
+ods report merge reports/*.json                       # text summary
+ods report merge reports/*.json --json                # machine-readable
+ods report merge reports/*.json --html index.html     # dashboard: trend, tools, per-repository table
+ods report merge reports/*.json --markdown summary.md # for a job summary or README
+```
+
+```text
+$ ods report merge reports/*.json
+ODS AI Attribution Report — organization — since 90 days ago
+
+  Repositories:   12 scanned · 9 with AI-assisted commits
+  Commits:        640 total · 210 AI-assisted (33%) · 430 human
+  Changed lines:  120340 total · 41020 AI-assisted (34%)
+
+  By tool:
+    Claude               150 commit(s)
+    GitHub Copilot        60 commit(s)
+
+  By repository:
+    org/api                                   120 commit(s) ·  67% AI ·  71% of lines
+    ...
+```
+
+The merge reads only the report files, never git. Weekly and monthly trends
+from repositories with different spans are rolled up to months. The
+[org-ai-report workflow](https://github.com/open-delivery-spec/.github/blob/main/.github/workflows/org-ai-report.yml)
+does the whole loop for a GitHub organization on a schedule and publishes the
+dashboard as an artifact, a job summary, or GitHub Pages; see the
+[Organization-wide View](https://open-delivery-spec.github.io/spec/org-view.html) guide.
 
 ---
 

@@ -42,6 +42,10 @@ func (c Commit) ChangedLines() int { return c.Insertions + c.Deletions }
 
 // Report is the aggregated AI-attribution summary over a window.
 type Report struct {
+	// Repo names the repository ("owner/name") so reports from different
+	// repositories can be told apart when merged into an organization view.
+	// Set from Options.Repo, or read from the origin remote.
+	Repo              string         `json:"repo,omitempty"`
 	Since             string         `json:"since"`
 	TotalCommits      int            `json:"total_commits"`
 	AICommits         int            `json:"ai_commits"`
@@ -56,6 +60,9 @@ type Report struct {
 	// windows) of AI vs human activity — the "trending which way" view. Empty
 	// when commits carry no dates.
 	Buckets []TimeBucket `json:"buckets,omitempty"`
+	// BucketGranularity is what one bucket spans: "week" or "month". Merging
+	// reports of different granularity rolls the weekly ones up to months.
+	BucketGranularity string `json:"bucket_granularity,omitempty"`
 }
 
 // TimeBucket aggregates one time slice of history for the trend view.
@@ -73,6 +80,9 @@ type Options struct {
 	Since string
 	// MaxCommits caps the number of commits scanned (0 = no cap).
 	MaxCommits int
+	// Repo is the repository name to record ("owner/name"). When empty it is
+	// derived from the origin remote.
+	Repo string
 }
 
 // Collect gathers commits from git history and aggregates them.
@@ -85,7 +95,42 @@ func Collect(opts Options) (*Report, error) {
 		return nil, err
 	}
 	r := Aggregate(commits, opts.Since)
+	r.Repo = opts.Repo
+	if r.Repo == "" {
+		if out, err := gitOutput("remote", "get-url", "origin"); err == nil {
+			r.Repo = repoNameFromRemote(out)
+		}
+	}
 	return &r, nil
+}
+
+// repoNameFromRemote reduces a git remote URL to "owner/name" so reports from
+// different repositories can be told apart when merged. It handles
+// https://host/owner/name(.git), ssh://git@host/owner/name, the scp-like
+// git@host:owner/name, and local paths; credentials embedded in a URL are
+// part of the host segment and are dropped with it.
+func repoNameFromRemote(remote string) string {
+	u := strings.TrimSpace(remote)
+	if u == "" {
+		return ""
+	}
+	u = strings.TrimSuffix(u, "/")
+	u = strings.TrimSuffix(u, ".git")
+	if i := strings.Index(u, "://"); i >= 0 {
+		u = u[i+3:]
+		j := strings.Index(u, "/")
+		if j < 0 {
+			return ""
+		}
+		u = u[j+1:]
+	} else if i := strings.Index(u, ":"); i >= 0 && !strings.Contains(u[:i], "/") {
+		u = u[i+1:] // git@github.com:owner/name
+	}
+	parts := strings.Split(strings.Trim(u, "/"), "/")
+	if len(parts) >= 2 {
+		return parts[len(parts)-2] + "/" + parts[len(parts)-1]
+	}
+	return u
 }
 
 // collectCommits runs git and parses attribution + churn into commits.
@@ -207,15 +252,16 @@ func Aggregate(commits []Commit, since string) Report {
 		r.AILineShare = float64(r.AIChangedLines) / float64(r.TotalChangedLines)
 	}
 	r.Summary = summarize(r)
-	r.Buckets = buildBuckets(commits)
+	r.Buckets, r.BucketGranularity = buildBuckets(commits)
 	return r
 }
 
 // buildBuckets groups dated commits into a chronological trend. Commits with a
 // zero date are skipped (git always provides dates; test fixtures may not).
 // Granularity is weekly, or monthly when the span exceeds ~26 weeks, so a
-// year-long window stays readable.
-func buildBuckets(commits []Commit) []TimeBucket {
+// year-long window stays readable. The second result names the granularity
+// ("week" or "month"; "" when there are no buckets).
+func buildBuckets(commits []Commit) ([]TimeBucket, string) {
 	var dated []Commit
 	var min, max time.Time
 	for _, c := range commits {
@@ -231,10 +277,14 @@ func buildBuckets(commits []Commit) []TimeBucket {
 		}
 	}
 	if len(dated) == 0 {
-		return nil
+		return nil, ""
 	}
 
 	monthly := max.Sub(min) > 26*7*24*time.Hour
+	granularity := "week"
+	if monthly {
+		granularity = "month"
+	}
 	key := func(t time.Time) (label, start string) {
 		if monthly {
 			return t.Format("2006-01"), t.Format("2006-01") + "-01"
@@ -267,7 +317,7 @@ func buildBuckets(commits []Commit) []TimeBucket {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Start < out[j].Start })
-	return out
+	return out, granularity
 }
 
 func summarize(r Report) string {

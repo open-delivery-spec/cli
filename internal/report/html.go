@@ -7,24 +7,9 @@ import (
 	"time"
 )
 
-// RenderHTML renders a self-contained, shareable dashboard for the report.
-// No external assets — inline CSS and an inline SVG trend chart — so the file
-// opens offline and screenshots cleanly. The palette matches the ODS PR report
-// (GitHub dark theme) for one visual identity across the toolchain.
-func RenderHTML(r Report, generatedAt time.Time) string {
-	var b strings.Builder
-
-	aiPct := fmt.Sprintf("%.0f%%", r.AICommitShare*100)
-	linePct := fmt.Sprintf("%.0f%%", r.AILineShare*100)
-	generated := generatedAt.UTC().Format("2006-01-02 15:04 UTC")
-
-	b.WriteString(`<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ODS AI Attribution Report</title>
-<style>
+// dashboardCSS is the stylesheet shared by the repository and organization
+// dashboards: GitHub dark theme, matching the ODS PR report.
+const dashboardCSS = `<style>
   :root { --bg:#0d1117; --panel:#161b22; --border:#30363d; --fg:#c9d1d9; --muted:#8b949e;
           --fg-strong:#f0f6fc; --ai:#a371f7; --human:#30363d; --accent:#58a6ff; }
   * { box-sizing: border-box; }
@@ -55,6 +40,34 @@ func RenderHTML(r Report, generatedAt time.Time) string {
   .tool-count { width: 64px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
   footer { margin-top: 36px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: .82em; }
 </style>
+<style>
+  table.repos { border-collapse: collapse; width: 100%; font-size: .9em; }
+  table.repos th, table.repos td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  table.repos th { color: var(--fg-strong); font-weight: 600; background: var(--panel); }
+  table.repos td.num, table.repos th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.repos .share { display: inline-block; min-width: 46px; }
+  table.repos .bar { display: inline-block; width: 90px; height: 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; overflow: hidden; vertical-align: middle; margin-left: 8px; }
+  table.repos .bar span { display: block; height: 100%; background: var(--ai); }
+</style>`
+
+// RenderHTML renders a self-contained, shareable dashboard for the report.
+// No external assets — inline CSS and an inline SVG trend chart — so the file
+// opens offline and screenshots cleanly. The palette matches the ODS PR report
+// (GitHub dark theme) for one visual identity across the toolchain.
+func RenderHTML(r Report, generatedAt time.Time) string {
+	var b strings.Builder
+
+	aiPct := fmt.Sprintf("%.0f%%", r.AICommitShare*100)
+	linePct := fmt.Sprintf("%.0f%%", r.AILineShare*100)
+	generated := generatedAt.UTC().Format("2006-01-02 15:04 UTC")
+
+	b.WriteString(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ODS AI Attribution Report</title>
+` + dashboardCSS + `
 </head>
 <body>
 <header>
