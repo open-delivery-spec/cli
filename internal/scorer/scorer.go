@@ -16,7 +16,6 @@ import (
 
 // ScoreResult holds the full technical debt scoring output.
 type ScoreResult struct {
-	PRNumber           int            `json:"pr_number,omitempty"`
 	TechnicalDebtDelta float64        `json:"technical_debt_delta"`
 	Breakdown          ScoreBreakdown `json:"breakdown"`
 	Verdict            string         `json:"verdict"` // direction of the delta: "increase", "neutral", "decrease"
@@ -32,7 +31,7 @@ type ScoreBreakdown struct {
 	DefectDensity      float64 `json:"defect_density"`       // high/critical issues per KLOC (informational — not part of the delta)
 	CriticalIssues     int     `json:"critical_issues"`      // critical + high severity
 	TestCoverage       float64 `json:"test_coverage"`        // fraction in [0,1] or -1 if not measured
-	TestCoverageSource string  `json:"test_coverage_source"` // go/lcov/cobertura/nyc/estimated/unknown
+	TestCoverageSource string  `json:"test_coverage_source"` // go/lcov/cobertura/nyc/unknown
 	DuplicationRate    float64 `json:"duplication_rate"`     // estimated duplication among added code lines
 }
 
@@ -42,14 +41,15 @@ type Options struct {
 	DetectorResult *detector.DetectionResult
 	// AnalyzerResult from quality analysis.
 	AnalyzerResult *analyzer.AnalysisResult
-	// TestLines is the number of lines in test files changed (used when CoverageResult is nil).
-	TestLines int
 	// TotalChangedLines is the total lines changed in the PR.
 	TotalChangedLines int
-	// CoverageResult carries a parsed coverage fraction from a real coverage file.
-	// When nil, coverage is estimated from TestLines/TotalChangedLines (or marked -1 if
-	// TestLines is also 0). When set, its Coverage field may be -1 for "not measured".
+	// CoverageResult carries a coverage fraction parsed from a real coverage
+	// report. When nil, coverage is not measured (-1); it is never estimated.
+	// When set, its Coverage field may itself be -1 for "not measured".
 	CoverageResult *CoverageInput
+	// DiffBase is the git ref the change is diffed against, used by the
+	// duplication estimate. Empty falls back to ODS_DIFF_BASE, then HEAD~1.
+	DiffBase string
 }
 
 // CoverageInput carries the parsed coverage fraction and its source.
@@ -94,28 +94,24 @@ func Score(opts Options) *ScoreResult {
 		}
 	}
 
-	// Dimension 3: Test coverage.
-	// Prefer an explicitly provided coverage result from a parsed file.
-	// Fall back to estimating from test-file line counts in the diff.
-	// -1 sentinel means "not measured" — the coverage penalty is skipped.
-	switch {
-	case opts.CoverageResult != nil:
+	// Dimension 3: Test coverage, from a parsed coverage report only. The -1
+	// sentinel means "not measured" and skips the coverage-gap term. Nothing
+	// is estimated from test-file line counts: that number is not coverage,
+	// and it fed policies as if it were.
+	if opts.CoverageResult != nil {
 		br.TestCoverage = opts.CoverageResult.Coverage
 		br.TestCoverageSource = opts.CoverageResult.Source
 		if br.TestCoverageSource == "" {
 			br.TestCoverageSource = "unknown"
 		}
-	case opts.TotalChangedLines > 0 && opts.TestLines > 0:
-		br.TestCoverage = float64(opts.TestLines) / float64(opts.TotalChangedLines)
-		br.TestCoverageSource = "estimated"
-	default:
+	} else {
 		br.TestCoverage = -1
 		br.TestCoverageSource = "unknown"
 	}
 
 	// Dimension 4: Duplication rate (estimated via git)
 	if opts.TotalChangedLines > 0 {
-		br.DuplicationRate = estimateDuplication()
+		br.DuplicationRate = estimateDuplication(opts.DiffBase)
 	}
 
 	result.Breakdown = br
@@ -208,12 +204,14 @@ func ratioSource(sources []string) string {
 }
 
 // estimateDuplication looks at the git diff to estimate the duplication rate
-// of the *code* the change adds. Reads ODS_DIFF_BASE from the environment (set
-// by validate-action) so the same diff range is used here as in the rest of
-// the pipeline. Non-code files are excluded: repeated table rows in a README
+// of the *code* the change adds. diffBase is the range the rest of the
+// pipeline used; empty falls back to ODS_DIFF_BASE (set by validate-action),
+// then HEAD~1. Non-code files are excluded: repeated table rows in a README
 // are not copy-pasted code, and a docs-only change has nothing to estimate.
-func estimateDuplication() float64 {
-	diffBase := os.Getenv("ODS_DIFF_BASE")
+func estimateDuplication(diffBase string) float64 {
+	if diffBase == "" {
+		diffBase = os.Getenv("ODS_DIFF_BASE")
+	}
 	if diffBase == "" {
 		diffBase = "HEAD~1"
 	}

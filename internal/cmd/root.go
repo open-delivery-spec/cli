@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/open-delivery-spec/cli/internal/logx"
@@ -12,19 +13,18 @@ var debugFlag bool
 
 var rootCmd = &cobra.Command{
 	Use:   "ods",
-	Short: "Open Delivery Spec — AI code quality gate",
-	Long: `ods — Detect AI-generated code, analyze its quality,
-score technical debt impact, and enforce enterprise policy.
+	Short: "Open Delivery Spec — governance and visibility for AI-assisted code",
+	Long: `ods — Attribute AI-assisted code from the signals tools volunteer, surface
+quality findings, score technical debt impact, and enforce policy as code.
 
 Commands:
-  detect   Detect AI-generated code
+  detect   Attribute AI-assisted code in a change
   analyze  Analyze AI code quality
   score    Score technical debt impact
   check    Evaluate OPA Rego policy
   attest   Emit an AI-code evidence document (CycloneDX)
   report   Summarize AI-assisted vs human work over recent history
   rules    List the built-in AI code quality rules
-  hook     Install git hooks
   init     Scaffold ODS configuration
 
 Use --debug (or set ODS_DEBUG=1) to print decision diagnostics to stderr.`,
@@ -43,5 +43,6 @@ func Execute() error {
 func init() {
 	rootCmd.PersistentFlags().BoolVar(&debugFlag, "debug", false,
 		"enable debug logging to stderr (also via ODS_DEBUG=1)")
+	rootCmd.SetVersionTemplate(fmt.Sprintf("ods {{.Version}} (commit %s, built %s)\n", version.Commit, version.Date))
 	// Subcommands register themselves via their own init() functions
 }

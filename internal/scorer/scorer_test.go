@@ -23,7 +23,7 @@ func TestScoreLowRisk(t *testing.T) {
 			TotalLines: 100,
 			Issues:     nil,
 		},
-		TestLines:         80,
+		CoverageResult:    &CoverageInput{Coverage: 0.8, Source: "go"},
 		TotalChangedLines: 100,
 	})
 
@@ -52,7 +52,7 @@ func TestScoreHighRisk(t *testing.T) {
 				{Rule: "test", Severity: "medium", Line: 3},
 			},
 		},
-		TestLines:         10,
+		CoverageResult:    &CoverageInput{Coverage: 0.1, Source: "go"},
 		TotalChangedLines: 100,
 	})
 
@@ -82,7 +82,7 @@ func TestScoreNeutral(t *testing.T) {
 				{Rule: "test", Severity: "low", Line: 1},
 			},
 		},
-		TestLines:         50,
+		CoverageResult:    &CoverageInput{Coverage: 0.5, Source: "go"},
 		TotalChangedLines: 100,
 	})
 
@@ -118,7 +118,7 @@ func TestScoreBreakdown(t *testing.T) {
 				{Rule: "t3", Severity: "high", Line: 3},
 			},
 		},
-		TestLines:         20,
+		CoverageResult:    &CoverageInput{Coverage: 0.2, Source: "go"},
 		TotalChangedLines: 100,
 	})
 
@@ -147,7 +147,7 @@ func TestScore_CleanAIPRIsLowRisk(t *testing.T) {
 			},
 		},
 		AnalyzerResult:    &analyzer.AnalysisResult{TotalLines: 100, Issues: nil},
-		TestLines:         90,
+		CoverageResult:    &CoverageInput{Coverage: 0.9, Source: "go"},
 		TotalChangedLines: 100,
 	})
 	if res.Breakdown.AICodeRatio != 1.0 {
@@ -217,11 +217,11 @@ func TestScore_RatioSourceFollowsDetector(t *testing.T) {
 // points, risk says how far. +0.1 used to be labelled "decrease".
 func TestScore_VerdictIsDirectionRiskIsBand(t *testing.T) {
 	t.Setenv("ODS_DIFF_BASE", "HEAD") // zero duplication, deterministic
-	mk := func(testLines int, issues []analyzer.Issue) *ScoreResult {
+	mk := func(coverage float64, issues []analyzer.Issue) *ScoreResult {
 		return Score(Options{
 			DetectorResult:    &detector.DetectionResult{},
 			AnalyzerResult:    &analyzer.AnalysisResult{TotalLines: 100, Issues: issues},
-			TestLines:         testLines,
+			CoverageResult:    &CoverageInput{Coverage: coverage, Source: "go"},
 			TotalChangedLines: 100,
 		})
 	}
@@ -237,11 +237,11 @@ func TestScore_VerdictIsDirectionRiskIsBand(t *testing.T) {
 		res           *ScoreResult
 		verdict, risk string
 	}{
-		{"fully covered, no issues → +0.0", mk(100, nil), "neutral", "low"},
-		{"90% coverage → +0.1 is an increase, still low risk", mk(90, nil), "increase", "low"},
-		{"one high finding + gap → moderate", mk(50, high(1)), "increase", "moderate"},
-		{"three high findings → high", mk(100, high(3)), "increase", "high"},
-		{"four high findings → critical", mk(100, high(4)), "increase", "critical"},
+		{"fully covered, no issues → +0.0", mk(1.0, nil), "neutral", "low"},
+		{"90% coverage → +0.1 is an increase, still low risk", mk(0.9, nil), "increase", "low"},
+		{"one high finding + gap → moderate", mk(0.5, high(1)), "increase", "moderate"},
+		{"three high findings → high", mk(1.0, high(3)), "increase", "high"},
+		{"four high findings → critical", mk(1.0, high(4)), "increase", "critical"},
 	}
 	for _, c := range cases {
 		if c.res.Verdict != c.verdict || c.res.Risk != c.risk {
@@ -269,7 +269,7 @@ func TestScore_AIRatioAmplifiesButDoesNotCreate(t *testing.T) {
 				TotalLines: 100,
 				Issues:     []analyzer.Issue{{Rule: "t", Severity: "high", Line: 1}},
 			},
-			TestLines:         100, // coverage 1.0 → no coverage-gap term
+			CoverageResult:    &CoverageInput{Coverage: 1.0, Source: "go"}, // no coverage-gap term
 			TotalChangedLines: 100,
 		})
 	}
@@ -305,7 +305,7 @@ func TestFormatScore(t *testing.T) {
 				{Rule: "t1", Severity: "critical", Line: 1},
 			},
 		},
-		TestLines:         30,
+		CoverageResult:    &CoverageInput{Coverage: 0.3, Source: "go"},
 		TotalChangedLines: 100,
 	})
 
@@ -316,7 +316,7 @@ func TestFormatScore(t *testing.T) {
 }
 
 func TestEstimateDuplication(t *testing.T) {
-	rate := estimateDuplication()
+	rate := estimateDuplication("")
 	// Should return a number between 0 and 1 (or 0 if no git repo)
 	if rate < 0 || rate > 1 {
 		t.Errorf("duplication rate = %f, want 0.0-1.0", rate)
@@ -356,7 +356,7 @@ func TestEstimateDuplication_codeFilesOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	gitIn(t, dir, "add", ".")
-	if rate := estimateDuplication(); rate != 0 {
+	if rate := estimateDuplication("HEAD"); rate != 0 {
 		t.Errorf("docs-only change: duplication = %f, want 0", rate)
 	}
 
@@ -365,7 +365,7 @@ func TestEstimateDuplication_codeFilesOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	gitIn(t, dir, "add", ".")
-	if rate := estimateDuplication(); rate <= 0 {
+	if rate := estimateDuplication("HEAD"); rate <= 0 {
 		t.Errorf("repeated code lines: duplication = %f, want > 0", rate)
 	}
 }
@@ -439,7 +439,7 @@ func TestScore_DeltaIndependentOfDiffSize(t *testing.T) {
 				TotalLines: lines,
 				Issues:     []analyzer.Issue{{Rule: "t", Severity: "high", Line: 1}},
 			},
-			TestLines:         lines, // coverage 1.0 → no coverage-gap term
+			CoverageResult:    &CoverageInput{Coverage: 1.0, Source: "go"}, // no coverage-gap term
 			TotalChangedLines: lines,
 		})
 	}
@@ -452,5 +452,24 @@ func TestScore_DeltaIndependentOfDiffSize(t *testing.T) {
 	if small.Breakdown.DefectDensity <= large.Breakdown.DefectDensity {
 		t.Errorf("density should still reflect the per-KLOC ratio: small=%f large=%f",
 			small.Breakdown.DefectDensity, large.Breakdown.DefectDensity)
+	}
+}
+
+// TestScore_CoverageIsNeverEstimated: without a parsed coverage report the
+// coverage is "not measured" (-1) and the coverage-gap term is skipped. It used
+// to be estimated as test-file lines over changed lines, a number that is not
+// coverage and could exceed 100%.
+func TestScore_CoverageIsNeverEstimated(t *testing.T) {
+	res := Score(Options{
+		DetectorResult:    &detector.DetectionResult{},
+		AnalyzerResult:    &analyzer.AnalysisResult{TotalLines: 100},
+		TotalChangedLines: 100,
+		DiffBase:          "HEAD",
+	})
+	if res.Breakdown.TestCoverage != -1 || res.Breakdown.TestCoverageSource != "unknown" {
+		t.Errorf("coverage = %f (%s), want -1 (unknown)", res.Breakdown.TestCoverage, res.Breakdown.TestCoverageSource)
+	}
+	if res.TechnicalDebtDelta != 0 {
+		t.Errorf("delta = %f, want 0 with nothing measured", res.TechnicalDebtDelta)
 	}
 }

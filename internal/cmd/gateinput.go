@@ -2,10 +2,7 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"strings"
 
-	"github.com/open-delivery-spec/cli/internal/analyzer"
 	"github.com/open-delivery-spec/cli/internal/coverage"
 	"github.com/open-delivery-spec/cli/internal/detector"
 	"github.com/open-delivery-spec/cli/internal/logx"
@@ -13,107 +10,18 @@ import (
 	"github.com/open-delivery-spec/cli/internal/mutation"
 	"github.com/open-delivery-spec/cli/internal/policy"
 	"github.com/open-delivery-spec/cli/internal/review"
-	"github.com/open-delivery-spec/cli/internal/sarif"
-	"github.com/open-delivery-spec/cli/internal/scorer"
 	"github.com/spf13/cobra"
 )
 
-// assembleGateInputs runs the detect → analyze → score pipeline over diffBase
-// and assembles the complete policy input, exactly as `ods check` evaluates
-// it. Shared by check (the gate) and attest (the evidence document) so both
-// act on the same facts — the evidence document must never be assembled from
-// a different pipeline than the one that gated the change.
+// assembleGateInputs runs the pipeline over diffBase (runPipeline, the same
+// one `ods score` prints) and adds the gate-only inputs: changed paths,
+// merge-confidence facts, patch coverage, mutation score and AI reviews.
+// Shared by check (the gate) and attest (the evidence document) so both act
+// on the same facts — the evidence document must never be assembled from a
+// different pipeline than the one that gated the change.
 func assembleGateInputs(cmd *cobra.Command, diffBase, sarifPath string, aiReviews []string, mutationPath string) (*policy.EvalInput, *detector.DetectionResult, error) {
-	// Run detector
-	detectOpts := detector.Options{DiffBase: diffBase, MaxCommits: 10}
-	branch := detectBranch
-	if branch == "" {
-		// try env (check both names for compatibility)
-		branch = os.Getenv("ODS_BRANCH")
-	}
-	if branch == "" {
-		branch = os.Getenv("ODS_BRANCH_NAME")
-	}
-	if branch != "" {
-		detectOpts.BranchName = branch
-	}
-	detectResult, err := detector.Detect(detectOpts)
-	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: detection failed: %v\n", err)
-		detectResult = &detector.DetectionResult{}
-	}
-
-	// Run analyzer on the changed files for this diff range
-	diffFiles, _ := getGitDiffFiles(diffBase)
-	var analyzeResult *analyzer.AnalysisResult
-	if len(diffFiles) > 0 {
-		analyzeResult = analyzer.Analyze(analyzer.Options{Files: diffFiles})
-	} else {
-		analyzeResult = &analyzer.AnalysisResult{}
-	}
-
-	// Merge external SARIF findings so the policy gate (and the score below) act
-	// on authoritative analyzer results, not just the built-in heuristics.
-	if sarifPath != "" {
-		if iss, err := sarif.Load(sarifPath); err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: loading SARIF file: %v\n", err)
-		} else {
-			analyzeResult.Issues = append(analyzeResult.Issues, iss...)
-			analyzeResult.Summary = analyzer.ResummarizeSARIF(analyzeResult.Issues)
-			logx.Debugf("check: merged %d SARIF finding(s) from %s", len(iss), sarifPath)
-		}
-	}
-
-	// Derive TotalChangedLines and TestLines from the actual diff rather than from
-	// AI-detected file counts (which fall back to 1 when nothing is detected and
-	// cause TestCoverage and AICodeRatio to use a degenerate denominator).
-	totalLines := 0
-	testLines := 0
-	for path, lines := range diffFiles {
-		totalLines += len(lines)
-		if strings.HasSuffix(path, "_test.go") {
-			testLines += len(lines)
-		}
-	}
-	if totalLines == 0 {
-		for _, f := range detectResult.Files {
-			totalLines += f.TotalLines
-		}
-	}
-	if totalLines == 0 {
-		totalLines = 1
-	}
-
-	// Auto-detect coverage report; pass -1 sentinel when not found so the
-	// coverage penalty is not applied to PRs with no coverage tooling.
-	covResult := coverage.Detect(".")
-	var covInput *scorer.CoverageInput
-	if covResult.Coverage >= 0 {
-		covInput = &scorer.CoverageInput{
-			Coverage: covResult.Coverage,
-			Source:   string(covResult.Source),
-		}
-	}
-
-	logx.Debugf("check: detection ai_generated=%t confidence=%.2f sources=%v",
-		detectResult.AIGenerated, detectResult.Confidence, detectResult.Sources)
-	logx.Debugf("check: analysis issues=%d (changed lines=%d, test lines=%d)",
-		len(analyzeResult.Issues), totalLines, testLines)
-	logx.Debugf("check: coverage source=%s value=%.2f", covResult.Source, covResult.Coverage)
-
-	scoreResult := scorer.Score(scorer.Options{
-		DetectorResult:    detectResult,
-		AnalyzerResult:    analyzeResult,
-		TestLines:         testLines,
-		TotalChangedLines: totalLines,
-		CoverageResult:    covInput,
-	})
-
-	logx.Debugf("check: score delta=%.2f verdict=%s risk=%s (ai_ratio=%.2f/%s defect_density=%.2f critical=%d coverage=%.2f dup=%.2f)",
-		scoreResult.TechnicalDebtDelta, scoreResult.Verdict, scoreResult.Risk,
-		scoreResult.Breakdown.AICodeRatio, scoreResult.Breakdown.AICodeRatioSource, scoreResult.Breakdown.DefectDensity,
-		scoreResult.Breakdown.CriticalIssues, scoreResult.Breakdown.TestCoverage,
-		scoreResult.Breakdown.DuplicationRate)
+	p := runPipeline(cmd, diffBase, sarifPath, "")
+	detectResult, analyzeResult, diffFiles, scoreResult := p.Detect, p.Analysis, p.DiffFiles, p.Score
 
 	// Build complete list of changed file paths for policy input.
 	// getAllChangedFiles includes all file types (not just code files), so Rego
@@ -175,7 +83,7 @@ func assembleGateInputs(cmd *cobra.Command, diffBase, sarifPath string, aiReview
 		TechnicalDebtDelta: scoreResult.TechnicalDebtDelta,
 		TestCoverage:       scoreResult.Breakdown.TestCoverage,
 		TestCoverageSource: scoreResult.Breakdown.TestCoverageSource,
-		Branch:             detectOpts.BranchName,
+		Branch:             p.Branch,
 		ChangedFiles:       changedFiles,
 		PatchCoverage:      patchCoverage,
 		MutationScore:      mutationScore,

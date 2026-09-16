@@ -1,7 +1,7 @@
 // Package analyzer detects known quality defects in AI-generated code.
 // It provides a rule-based analysis engine that identifies patterns unique to
 // AI-generated code — hallucinated APIs, redundant error handling, over-commenting,
-// missing edge cases, unsafe patterns, and inconsistent styles.
+// unsafe patterns, and inconsistent styles.
 package analyzer
 
 import (
@@ -24,7 +24,6 @@ type Issue struct {
 
 // AnalysisResult holds all issues found during analysis.
 type AnalysisResult struct {
-	PRNumber   int     `json:"pr_number,omitempty"`
 	TotalLines int     `json:"total_lines"`
 	AILines    int     `json:"ai_lines"`
 	Issues     []Issue `json:"issues"`
@@ -33,12 +32,9 @@ type AnalysisResult struct {
 
 // Options configures analysis behavior.
 type Options struct {
-	// AIOnly when true, adjusts severity weights for AI-specific patterns.
-	AIOnly bool
-	// Files is a map of filename to content lines.
+	// Files maps a filename to the lines to analyze (a file's content, or the
+	// lines a diff added to it).
 	Files map[string][]string
-	// DiffLines are the added lines from a git diff (keyed by file).
-	DiffLines map[string][]string
 }
 
 // Analyze runs all quality rules against the provided code.
@@ -47,27 +43,12 @@ func Analyze(opts Options) *AnalysisResult {
 		Issues: make([]Issue, 0),
 	}
 
-	if opts.Files == nil && opts.DiffLines == nil {
+	if opts.Files == nil {
 		result.Summary = "No code to analyze"
 		return result
 	}
 
-	// Merge files and diff lines
-	allFiles := make(map[string][]string)
 	for path, lines := range opts.Files {
-		allFiles[path] = lines
-	}
-	for path, lines := range opts.DiffLines {
-		if existing, ok := allFiles[path]; ok {
-			allFiles[path] = append(existing, lines...)
-		} else {
-			allFiles[path] = lines
-		}
-	}
-
-	totalLines := 0
-	for path, lines := range allFiles {
-		totalLines += len(lines)
 		result.TotalLines += len(lines)
 
 		// Run each rule
@@ -77,9 +58,6 @@ func Analyze(opts Options) *AnalysisResult {
 		result.Issues = append(result.Issues, checkInconsistentPattern(path, lines)...)
 		result.Issues = append(result.Issues, checkHallucinatedAPI(path, lines)...)
 	}
-
-	// Re-number lines for issues in merged files
-	_ = totalLines
 
 	// Generate summary
 	result.Summary = summarizeIssues(result.Issues)

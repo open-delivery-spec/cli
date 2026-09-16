@@ -5,6 +5,7 @@ package policy
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -275,132 +276,15 @@ func extractStringList(raw interface{}) []string {
 	return result
 }
 
-// DefaultRegoPolicy returns a default built-in policy for ODS.
+//go:embed default_policy.rego
+var defaultPolicyRego string
+
+// DefaultRegoPolicy returns the built-in default policy: what `ods check`
+// applies when a repository has no .ods/policy.rego, and the text `ods init`
+// writes as a repository's starting policy. One source, so the two never
+// diverge.
 func DefaultRegoPolicy() string {
-	return `package ods.policy
-
-# Default ODS policy: block changes with critical issues or high tech debt
-default allow := true
-
-deny[msg] {
-    input.issues[_].severity == "critical"
-    msg = sprintf("CRITICAL issue: %s in %s", [input.issues[_].rule, input.issues[_].file])
-}
-
-deny[msg] {
-    input.technical_debt_delta > 5.0
-    msg = sprintf("Technical debt increase %.1f exceeds threshold (5.0)", [input.technical_debt_delta * 1.0])
-}
-
-warn[msg] {
-    input.ai_generated == true
-    input.ai_confidence > 0.8
-    count(input.issues) > 2
-    msg = "High-confidence AI code with multiple quality issues — enhanced review recommended"
-}
-
-warn[msg] {
-    input.ai_generated == true
-    input.test_coverage >= 0
-    input.test_coverage < 0.3
-    pct := round(input.test_coverage * 100)
-    msg = sprintf("AI-generated code has only %d%% test coverage", [pct])
-}
-
-# Disclosure completeness: the SFC guidance and the kernel docs both say AI
-# involvement should be disclosed by the author (trailers, PR disclosure),
-# not left for heuristics to suspect. Nudge, never block.
-ai_disclosed {
-    input.detection_sources[_] == "commit-trailer"
-}
-
-ai_disclosed {
-    input.detection_sources[_] == "git-ai-notes"
-}
-
-ai_disclosed {
-    input.detection_sources[_] == "pr-body"
-}
-
-warn[msg] {
-    input.ai_generated == true
-    not ai_disclosed
-    msg = "AI code detected without author disclosure — ask for attribution (Co-Authored-By/Assisted-by trailer, or an AI disclosure in the PR body)"
-}
-
-# AI reviewer verdicts are probabilistic: by default they only tighten the
-# gate (route more human attention), never deny. Teams may opt in to harder
-# enforcement over input.ai_reviews in their own policy.
-review_tier := "elevated" {
-    input.ai_reviews[_].verdict == "request_changes"
-}
-
-warn[msg] {
-    rev := input.ai_reviews[_]
-    rev.verdict == "request_changes"
-    msg = sprintf("AI reviewer %s requested changes (%d finding(s)) — extra review routed", [rev.tool, count(rev.findings)])
-}
-
-# Merge-confidence: deterministic, diff-scoped facts (is it tested, does it
-# touch sensitive paths). They route review attention; AI-authored changes get
-# a higher bar. Deny stays opt-in — write your own deny over
-# input.merge_confidence to enforce.
-warn[msg] {
-    input.merge_confidence.added_source_without_tests
-    msg = "Source code changed but no tests were added or updated"
-}
-
-warn[msg] {
-    p := input.merge_confidence.risky_paths[_]
-    msg = sprintf("Change touches a sensitive path (%s) — extra review recommended", [p])
-}
-
-review_tier := "elevated" {
-    input.ai_generated
-    input.merge_confidence.added_source_without_tests
-}
-
-review_tier := "elevated" {
-    input.ai_generated
-    input.merge_confidence.risky_paths[_]
-}
-
-# Patch (diff) coverage: is *this change's* new code tested? Warn + route
-# AI-authored changes whose added lines are poorly covered. −1 means not
-# measured (guard with >= 0). Threshold is tunable; deny stays opt-in.
-warn[msg] {
-    input.ai_generated
-    input.patch_coverage >= 0
-    input.patch_coverage < 0.8
-    pct := round(input.patch_coverage * 100)
-    msg = sprintf("AI-authored change: only %d%% of added lines are covered by tests", [pct])
-}
-
-review_tier := "elevated" {
-    input.ai_generated
-    input.patch_coverage >= 0
-    input.patch_coverage < 0.8
-}
-
-# Mutation score (diff-scoped): do the tests actually *catch* changes to the new
-# code, or just execute it? Warn + route AI-authored changes whose added lines
-# have a weak mutation score. −1 means not measured (guard with >= 0). Mutation
-# scores run lower than coverage, so the default threshold is lower; tune it.
-# Deny stays opt-in.
-warn[msg] {
-    input.ai_generated
-    input.mutation_score >= 0
-    input.mutation_score < 0.5
-    pct := round(input.mutation_score * 100)
-    msg = sprintf("AI-authored change: tests kill only %d%% of mutations on the added lines", [pct])
-}
-
-review_tier := "elevated" {
-    input.ai_generated
-    input.mutation_score >= 0
-    input.mutation_score < 0.5
-}
-`
+	return defaultPolicyRego
 }
 
 // DiscoverRegoFile finds a Rego policy file in the repository.

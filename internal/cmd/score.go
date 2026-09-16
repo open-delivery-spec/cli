@@ -3,15 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"os/exec"
-	"strings"
 
-	"github.com/open-delivery-spec/cli/internal/analyzer"
-	"github.com/open-delivery-spec/cli/internal/coverage"
-	"github.com/open-delivery-spec/cli/internal/detector"
-	"github.com/open-delivery-spec/cli/internal/logx"
-	"github.com/open-delivery-spec/cli/internal/sarif"
 	"github.com/open-delivery-spec/cli/internal/scorer"
 	"github.com/spf13/cobra"
 )
@@ -19,7 +11,6 @@ import (
 var (
 	scoreJSON         bool
 	scoreFormat       string
-	scoreTestDir      string
 	scoreCoverageFile string
 	scoreSARIF        string
 	scoreDiffBase     string
@@ -32,8 +23,9 @@ var scoreCmd = &cobra.Command{
 quality analysis, test coverage, and duplication signals.
 
 Coverage is auto-detected from common report files (coverage.out, lcov.info,
-coverage.xml, coverage-summary.json). Use --coverage to specify the file
-explicitly, or --test-dir to estimate coverage from test file line counts.
+coverage.xml, coverage-summary.json); use --coverage to name the file. Without
+a report, coverage is "not measured" (-1) and the coverage-gap term is skipped;
+it is never estimated.
 
 Examples:
   ods score                             # score the current diff
@@ -47,100 +39,14 @@ func init() {
 	rootCmd.AddCommand(scoreCmd)
 	scoreCmd.Flags().BoolVar(&scoreJSON, "json", false, "output as JSON")
 	scoreCmd.Flags().StringVar(&scoreFormat, "format", "summary", "output format: summary, detail, json")
-	scoreCmd.Flags().StringVar(&scoreTestDir, "test-dir", "", "test directory (fallback line-count estimation)")
 	scoreCmd.Flags().StringVar(&scoreCoverageFile, "coverage", "", "coverage report file (auto-detected if not set)")
 	scoreCmd.Flags().StringVar(&scoreSARIF, "sarif", "", "SARIF v2.1.0 file whose findings are merged into the score")
 	scoreCmd.Flags().StringVar(&scoreDiffBase, "diff-base", "", "git ref to diff against (default: $ODS_DIFF_BASE or HEAD~1)")
 }
 
 func runScore(cmd *cobra.Command, args []string) error {
-	base := resolveDiffBase(scoreDiffBase)
-	// Keep the duplication estimator (which reads ODS_DIFF_BASE) on the same range.
-	os.Setenv("ODS_DIFF_BASE", base)
-
-	// Run detector
-	detectOpts := detector.Options{DiffBase: base, MaxCommits: 10}
-	detectResult, err := detector.Detect(detectOpts)
-	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: detection failed: %v\n", err)
-		detectResult = &detector.DetectionResult{}
-	}
-
-	// Run analyzer on changed files
-	diffFiles, err := getGitDiffFiles(base)
-	var analyzeResult *analyzer.AnalysisResult
-	if err == nil && len(diffFiles) > 0 {
-		analyzeResult = analyzer.Analyze(analyzer.Options{Files: diffFiles})
-	} else {
-		analyzeResult = &analyzer.AnalysisResult{}
-	}
-
-	// Merge external SARIF findings so the debt score reflects authoritative
-	// analyzer results, not just the built-in heuristics.
-	if scoreSARIF != "" {
-		if iss, err := sarif.Load(scoreSARIF); err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Warning: loading SARIF file: %v\n", err)
-		} else {
-			analyzeResult.Issues = append(analyzeResult.Issues, iss...)
-			analyzeResult.Summary = analyzer.ResummarizeSARIF(analyzeResult.Issues)
-			logx.Debugf("score: merged %d SARIF finding(s) from %s", len(iss), scoreSARIF)
-		}
-	}
-
-	// Count changed lines — the same denominator `ods check` uses: the added
-	// lines across every changed code file. Summing only the AI-detected
-	// files instead made any AI-touched change look 100% AI.
-	totalLines := 0
-	for _, lines := range diffFiles {
-		totalLines += len(lines)
-	}
-	if totalLines == 0 {
-		for _, f := range detectResult.Files {
-			totalLines += f.TotalLines
-		}
-	}
-	if totalLines == 0 && analyzeResult.TotalLines > 0 {
-		totalLines = analyzeResult.TotalLines
-	}
-	if totalLines == 0 {
-		totalLines = 1
-	}
-
-	// Detect test coverage from a coverage report file.
-	var covResult coverage.Result
-	if scoreCoverageFile != "" {
-		covResult = coverage.Parse(scoreCoverageFile)
-	} else {
-		covResult = coverage.Detect(".")
-	}
-
-	// Fall back to test-dir line counting when no coverage file is available.
-	testLines := 0
-	if covResult.Coverage < 0 && scoreTestDir != "" {
-		testLines = countTestDirLines(scoreTestDir)
-	}
-
-	var covInput *scorer.CoverageInput
-	if covResult.Coverage >= 0 {
-		covInput = &scorer.CoverageInput{
-			Coverage: covResult.Coverage,
-			Source:   string(covResult.Source),
-		}
-	}
-
-	scoreResult := scorer.Score(scorer.Options{
-		DetectorResult:    detectResult,
-		AnalyzerResult:    analyzeResult,
-		TestLines:         testLines,
-		TotalChangedLines: totalLines,
-		CoverageResult:    covInput,
-	})
-
-	logx.Debugf("score: delta=%.2f verdict=%s risk=%s (ai_ratio=%.2f/%s defect_density=%.2f critical=%d coverage=%.2f dup=%.2f)",
-		scoreResult.TechnicalDebtDelta, scoreResult.Verdict, scoreResult.Risk,
-		scoreResult.Breakdown.AICodeRatio, scoreResult.Breakdown.AICodeRatioSource, scoreResult.Breakdown.DefectDensity,
-		scoreResult.Breakdown.CriticalIssues, scoreResult.Breakdown.TestCoverage,
-		scoreResult.Breakdown.DuplicationRate)
+	p := runPipeline(cmd, resolveDiffBase(scoreDiffBase), scoreSARIF, scoreCoverageFile)
+	scoreResult := p.Score
 
 	switch {
 	case scoreJSON || scoreFormat == "json":
@@ -201,23 +107,4 @@ func printScoreDetail(cmd *cobra.Command, r *scorer.ScoreResult) {
 	fmt.Fprintf(cmd.OutOrStdout(), "  Critical Issues:    %d\n", b.CriticalIssues)
 	fmt.Fprintf(cmd.OutOrStdout(), "  Test Coverage:      %s\n", coverageStr)
 	fmt.Fprintf(cmd.OutOrStdout(), "  Duplication Rate:   %.0f%%\n", b.DuplicationRate*100)
-}
-
-func countTestDirLines(dir string) int {
-	out, err := exec.Command("find", dir, "-name", "*_test.go", "-o", "-name", "test_*.py").Output()
-	if err != nil {
-		return 0
-	}
-	count := 0
-	for _, f := range strings.Split(string(out), "\n") {
-		f = strings.TrimSpace(f)
-		if f == "" {
-			continue
-		}
-		data, err := os.ReadFile(f)
-		if err == nil {
-			count += len(strings.Split(string(data), "\n"))
-		}
-	}
-	return count
 }

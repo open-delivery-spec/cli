@@ -1,7 +1,9 @@
 package version
 
-// Build-time variables injected by GoReleaser ldflags.
-var Version = "dev"
-var Value = "dev" // root.go reads this; goreleaser sets both Version and Value
-var Commit = "unknown"
-var Date = "unknown"
+// Build-time variables injected by GoReleaser ldflags (see .goreleaser.yml).
+// `ods --version` prints all three.
+var (
+	Value  = "dev"     // release version
+	Commit = "unknown" // git commit the binary was built from
+	Date   = "unknown" // build date
+)
