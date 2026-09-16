@@ -160,13 +160,14 @@ $ ods analyze --file internal/scanner/sarif.go --json
 |------|---------|-------------|
 | `--file`, `-f` | — | Analyze a single file |
 | `--dir`, `-d` | — | Analyze a directory (recursively) |
-| `--ai-only` | `false` | Only files detected as AI-generated |
 | `--fail-on` | `critical` | Minimum severity that exits non-zero: `info`, `low`, `medium`, `high`, `critical` |
 | `--json` | `false` | JSON output |
 | `--format` | `summary` | Output format: `summary`, `detail`, `json` |
+| `--sarif` | — | SARIF v2.1.0 file whose findings are merged into the result |
+| `--diff-base` | `$ODS_DIFF_BASE` or `HEAD~1` | Git ref to diff against |
 
 `ods analyze` also accepts file paths as positional arguments (`ods analyze a.go b.py`),
-analyzing those files and skipping non-code ones — the entry point the pre-commit hook uses.
+analyzing those files and skipping non-code ones — the entry point the pre-commit framework hook uses.
 
 ### `ods score` — Technical Debt Impact
 
@@ -207,14 +208,18 @@ AI-attributed commit added, capped at what the change still contains),
 `diff-heuristics` (estimated), or `unknown` — no per-file attribution exists,
 so the ratio is 0 and nothing is claimed rather than a number invented from
 the detection confidence. `duplication_rate` is estimated over added code
-lines only; repeated Markdown or YAML lines do not count.
+lines only; repeated Markdown or YAML lines do not count. `test_coverage` comes
+from a coverage report (Go, LCOV, Cobertura, NYC) found in the working directory
+or named with `--coverage`; without one it is `-1`, "not measured", and the
+coverage-gap term is skipped. It is never estimated.
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--json` | `false` | JSON output |
 | `--format` | `summary` | Output format: `summary`, `detail`, `json` |
-| `--test-dir` | — | Test directory path (auto-detected) |
+| `--coverage` | auto-detected | Coverage report file (`coverage.out`, `lcov.info`, `coverage.xml`, `coverage-summary.json`) |
 | `--sarif` | — | SARIF file whose findings are merged into the score |
+| `--diff-base` | `$ODS_DIFF_BASE` or `HEAD~1` | Git ref to diff against |
 
 ### `ods check` — Enterprise Policy Enforcement
 
@@ -509,21 +514,12 @@ advisory routing signal for changes that may merge, and it never affects the
 exit code. Policies that define no `review_tier` behave exactly as before
 (consumers should treat the absent tier as `standard`). An unknown tier value
 falls back to `standard` with a warning instead of failing the gate.
-`ods init` scaffolds these rules (with explanatory comments) into new policies.
+`ods init` writes the built-in default policy, which includes these rules with explanatory comments, as a repository's starting point.
 
-### `ods hook install` — Git Hooks
+### Local checks with pre-commit
 
-```bash
-$ ods hook install
-✅  pre-commit hook installed at .git/hooks/pre-commit
-✅  prepare-commit-msg hook installed at .git/hooks/prepare-commit-msg
-✅  pre-push hook installed at .git/hooks/pre-push
-```
-
-### pre-commit framework
-
-Teams using [pre-commit](https://pre-commit.com) can add ODS's local quality
-gate in one entry — the same analysis CI runs, but before you push:
+Teams using [pre-commit](https://pre-commit.com) can run ODS's analysis before
+every commit — the same analysis CI runs, but before you push — with one entry:
 
 ```yaml
 # .pre-commit-config.yaml
@@ -547,20 +543,27 @@ $ ods init
 ── ODS initialized ──
 
 Next steps:
-  1. Edit .ods/policy.rego to add custom enforcement rules
-  2. Install git hooks:  ods hook install
+  1. Edit .ods/policy.rego — it starts as the built-in default policy
+  2. Optional: run the same check before you push with the pre-commit hook
+     (see .pre-commit-hooks.yaml in github.com/open-delivery-spec/cli)
   3. Commit and push — ODS will run on your next PR
 ```
 
-`init` is idempotent — existing files are skipped, never overwritten.
+`init` is idempotent — existing files are skipped, never overwritten. The policy
+it writes is the built-in default, so a repository behaves the same before and
+after `init` until you edit it.
 
 ### `ods rules` — Rule Catalogue
 
 ```bash
 $ ods rules
-ODS Analysis Rules (4)
+ODS Analysis Rules (5)
 
-🔴 [high] ai-unsafe-deserialization
+⚪ [info] ai-redundant-error-handling
+  Dense clusters of if-err-nil blocks in close proximity. Informational only — dense error checks are idiomatic Go, not a defect.
+  → If these checks are repetitive boilerplate, consider a helper; otherwise this is normal Go.
+
+🟠 [high] ai-unsafe-deserialization
   json.Unmarshal into interface{} without type validation — AI commonly skips type checking.
   → Use a concrete struct type or validate the unmarshalled data before use.
 ...
