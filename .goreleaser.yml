@@ -25,7 +25,6 @@ builds:
     ldflags:
       - -s -w
       - -X github.com/open-delivery-spec/cli/internal/version.Value={{.Version}}
-      - -X github.com/open-delivery-spec/cli/internal/version.Version={{.Version}}
       - -X github.com/open-delivery-spec/cli/internal/version.Commit={{.Commit}}
       - -X github.com/open-delivery-spec/cli/internal/version.Date={{.Date}}
 

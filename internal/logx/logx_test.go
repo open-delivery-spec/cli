@@ -41,18 +41,6 @@ func TestDebugf_Enabled(t *testing.T) {
 	}
 }
 
-func TestSetEnabledAndEnabled(t *testing.T) {
-	t.Cleanup(reset)
-	SetEnabled(false)
-	if Enabled() {
-		t.Error("Enabled() = true after SetEnabled(false)")
-	}
-	SetEnabled(true)
-	if !Enabled() {
-		t.Error("Enabled() = false after SetEnabled(true)")
-	}
-}
-
 func TestDebugf_TogglesOff(t *testing.T) {
 	t.Cleanup(reset)
 	var buf bytes.Buffer

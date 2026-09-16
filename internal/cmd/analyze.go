@@ -18,7 +18,6 @@ import (
 var (
 	analyzeFile     string
 	analyzeDir      string
-	analyzeAIOnly   bool
 	analyzeJSON     bool
 	analyzeFormat   string
 	analyzeSARIF    string
@@ -79,13 +78,11 @@ Use --sarif to import findings from external tools (semgrep, CodeQL, etc.)
 and merge them into the ODS issue list. The SARIF file's results are
 converted to ODS severity levels and included in the JSON output.
 
-Use --ai-only to focus analysis on files detected as AI-generated.
 
 Examples:
   ods analyze --file auth.go
   ods analyze --dir ./src
   ods analyze --file handler.go --json
-  ods analyze --dir ./pkg --ai-only
   ods analyze --sarif semgrep.sarif --json`,
 	RunE: runAnalyze,
 }
@@ -97,8 +94,6 @@ func init() {
 		"file to analyze")
 	analyzeCmd.Flags().StringVarP(&analyzeDir, "dir", "d", "",
 		"directory to analyze (recursively)")
-	analyzeCmd.Flags().BoolVar(&analyzeAIOnly, "ai-only", false,
-		"only analyze files detected as AI-generated")
 	analyzeCmd.Flags().BoolVar(&analyzeJSON, "json", false,
 		"output as JSON")
 	analyzeCmd.Flags().StringVar(&analyzeFormat, "format", "summary",
@@ -170,33 +165,7 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 		// external scanner.
 	}
 
-	// If --ai-only, filter to files detected as AI-generated
-	if analyzeAIOnly {
-		detectResult, err := detector.Detect(detector.Options{
-			DiffBase:   resolveDiffBase(analyzeDiffBase),
-			MaxCommits: 10,
-		})
-		if err == nil && detectResult.AIGenerated {
-			aiFiles := make(map[string]bool)
-			for _, f := range detectResult.Files {
-				aiFiles[f.Path] = true
-			}
-			filtered := make(map[string][]string)
-			for path, lines := range files {
-				if aiFiles[path] || detectResult.Confidence >= 0.5 {
-					filtered[path] = lines
-				}
-			}
-			if len(filtered) > 0 {
-				files = filtered
-			}
-		}
-	}
-
-	opts := analyzer.Options{
-		AIOnly: analyzeAIOnly,
-		Files:  files,
-	}
+	opts := analyzer.Options{Files: files}
 
 	logx.Debugf("analyze: scanning %d file(s)", len(files))
 	result := analyzer.Analyze(opts)
@@ -250,7 +219,6 @@ func printAnalyzeSummary(cmd *cobra.Command, result *analyzer.AnalysisResult) {
 		return
 	}
 
-	counts := result.IssueCounts()
 	icon := "⚠️"
 	if result.HasCritical() {
 		icon = "❌"
@@ -283,7 +251,6 @@ func printAnalyzeSummary(cmd *cobra.Command, result *analyzer.AnalysisResult) {
 		}
 	}
 
-	_ = counts
 }
 
 func printAnalyzeDetail(cmd *cobra.Command, result *analyzer.AnalysisResult) {

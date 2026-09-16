@@ -19,9 +19,6 @@ var (
 // SetEnabled turns debug logging on or off.
 func SetEnabled(v bool) { enabled = v }
 
-// Enabled reports whether debug logging is currently on.
-func Enabled() bool { return enabled }
-
 // SetOutput redirects debug output. Used by tests; defaults to os.Stderr.
 func SetOutput(w io.Writer) { out = w }
 
