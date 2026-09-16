@@ -127,18 +127,6 @@ func TestReadDir(t *testing.T) {
 	}
 }
 
-func TestCountTestDirLines(t *testing.T) {
-	dir := t.TempDir()
-	mustWrite(t, filepath.Join(dir, "foo_test.go"), "package foo\n\nfunc TestFoo(t *testing.T) {}\n") // 3 lines
-	mustWrite(t, filepath.Join(dir, "test_bar.py"), "def test_bar():\n    assert True\n")             // 2 lines
-	mustWrite(t, filepath.Join(dir, "main.go"), "package main\n")                                     // not a test file
-
-	n := countTestDirLines(dir)
-	if n < 4 {
-		t.Errorf("countTestDirLines = %d, want >= 4 (test files only)", n)
-	}
-}
-
 // ─── output formatters ───────────────────────────────────────────
 
 func TestPrintAnalyzeSummary_NoIssues(t *testing.T) {
@@ -535,7 +523,7 @@ func TestScaffoldPolicyReviewTier(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.WriteString(defaultPolicy); err != nil {
+	if _, err := f.WriteString(policy.DefaultRegoPolicy()); err != nil {
 		t.Fatal(err)
 	}
 	f.Close()

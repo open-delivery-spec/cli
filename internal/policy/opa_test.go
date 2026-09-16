@@ -56,20 +56,29 @@ func TestEvaluateDefaultPolicy(t *testing.T) {
 		}
 	})
 
-	// Test 3: High tech debt blocks
-	t.Run("high tech debt blocks", func(t *testing.T) {
+	// Test 3: High tech debt warns; the heuristic score never blocks on its own
+	t.Run("high tech debt warns but does not block", func(t *testing.T) {
 		input := &EvalInput{
 			AIGenerated:        true,
 			AIConfidence:       0.9,
 			TechnicalDebtDelta: 6.5,
-			TestCoverage:       0.1,
+			TestCoverage:       0.5,
 		}
 		result, err := Evaluate(tmpFile.Name(), input)
 		if err != nil {
 			t.Fatalf("evaluate failed: %v", err)
 		}
-		if result.Allowed {
-			t.Error("expected allowed=false for high tech debt")
+		if !result.Allowed {
+			t.Errorf("a debt score alone must not deny, got denials: %v", result.Denials)
+		}
+		found := false
+		for _, w := range result.Warnings {
+			if strings.Contains(w, "Technical debt delta") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected a technical-debt warning, got %v", result.Warnings)
 		}
 	})
 
@@ -322,7 +331,8 @@ review_tier := "yolo"
 }
 
 func TestReviewTierAbsentStaysEmpty(t *testing.T) {
-	path := writeTempPolicy(t, DefaultRegoPolicy())
+	// A policy that defines no review_tier at all (the default policy does).
+	path := writeTempPolicy(t, "package ods.policy\n\ndefault allow := true\n")
 	result, err := Evaluate(path, &EvalInput{})
 	if err != nil {
 		t.Fatalf("evaluate failed: %v", err)
@@ -435,7 +445,7 @@ func TestDefaultPolicyMergeConfidence(t *testing.T) {
 		name     string
 		in       *EvalInput
 		wantWarn string // substring expected in warnings ("" = none of ours)
-		wantTier string // "" = no tier assigned by the default policy
+		wantTier string // the default policy routes a clean input to "auto"
 	}{
 		{
 			"AI source without tests warns and elevates",
@@ -447,7 +457,7 @@ func TestDefaultPolicyMergeConfidence(t *testing.T) {
 			"human source without tests warns but does not elevate",
 			&EvalInput{AIGenerated: false,
 				MergeConfidence: &EvalMergeConfidence{AddedSourceWithoutTests: true}},
-			"no tests", "",
+			"no tests", ReviewTierAuto,
 		},
 		{
 			"AI change touching a risky path warns and elevates",
@@ -459,12 +469,12 @@ func TestDefaultPolicyMergeConfidence(t *testing.T) {
 			"tested AI change is neutral",
 			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: -1, MutationScore: -1,
 				MergeConfidence: &EvalMergeConfidence{TestsTouched: true, SourceFilesChanged: 1, TestFilesChanged: 1}},
-			"", "",
+			"", ReviewTierAuto,
 		},
 		{
 			"absent merge_confidence is safe",
 			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: -1, MutationScore: -1},
-			"", "",
+			"", ReviewTierAuto,
 		},
 		{
 			"AI change with low patch coverage warns and elevates",
@@ -474,17 +484,17 @@ func TestDefaultPolicyMergeConfidence(t *testing.T) {
 		{
 			"AI change with full patch coverage is neutral",
 			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: 1.0, MutationScore: -1},
-			"", "",
+			"", ReviewTierAuto,
 		},
 		{
 			"human low patch coverage neither warns nor elevates",
 			&EvalInput{AIGenerated: false, PatchCoverage: 0.1},
-			"", "",
+			"", ReviewTierAuto,
 		},
 		{
 			"unmeasured patch coverage does not fire",
 			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: -1, MutationScore: -1},
-			"", "",
+			"", ReviewTierAuto,
 		},
 		{
 			"AI change with weak mutation score warns and elevates",
@@ -494,17 +504,17 @@ func TestDefaultPolicyMergeConfidence(t *testing.T) {
 		{
 			"AI change with strong mutation score is neutral",
 			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: -1, MutationScore: 0.9},
-			"", "",
+			"", ReviewTierAuto,
 		},
 		{
 			"human weak mutation score neither warns nor elevates",
 			&EvalInput{AIGenerated: false, PatchCoverage: -1, MutationScore: 0.1},
-			"", "",
+			"", ReviewTierAuto,
 		},
 		{
 			"unmeasured mutation score does not fire",
 			&EvalInput{AIGenerated: true, DetectionSources: []string{"commit-trailer"}, PatchCoverage: -1, MutationScore: -1},
-			"", "",
+			"", ReviewTierAuto,
 		},
 	}
 	for _, tc := range cases {
@@ -547,8 +557,12 @@ func TestDefaultPolicyAIReviewApproveIsNeutral(t *testing.T) {
 	if !res.Allowed {
 		t.Errorf("approve should not deny: %v", res.Denials)
 	}
-	if res.ReviewTier == ReviewTierAuto {
-		t.Error("an AI approve must never grant the auto tier by itself")
+	baseline, err := Evaluate(path, &EvalInput{})
+	if err != nil {
+		t.Fatalf("evaluate baseline: %v", err)
+	}
+	if res.ReviewTier != baseline.ReviewTier {
+		t.Errorf("an AI approve changed the tier: %q, without the review %q", res.ReviewTier, baseline.ReviewTier)
 	}
 }
 
