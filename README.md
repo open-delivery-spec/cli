@@ -78,6 +78,8 @@ Repos using [git-ai](https://github.com/git-ai-project/git-ai) get the highest-f
 
 This is attribution from signals the tools (or authors) volunteer, not forensic detection: stripping the trailer evades it, and the diff heuristics are only a low-confidence fallback. The aggregate confidence is the strongest signal plus 5% per additional independent source — five attributed commits are one source, not five — and it is capped at 95%: ODS never reports certainty about authorship.
 
+`ods detect` exits 0 whenever detection ran, whether or not AI was found; a non-zero exit means detection itself failed (for example, no git history to read). Deciding what a positive detection means for the merge is the policy's job: gate with `ods check`.
+
 ```bash
 $ ods detect --diff-base origin/main --branch feature/ai-oauth
 🤖  AI code detected — 85% confidence (PR shows AI disclosure)

@@ -66,11 +66,13 @@ jobs:
       - name: Detect AI code (no AI)
         run: ./ods detect --branch feature/add-login --json | tee /dev/stderr
 
-      - name: Detect AI code (high confidence block)
+      # A positive detection is a result, not an error: exit 0, ai_generated true.
+      - name: Detect AI code (positive result exits 0)
         run: |
-          ! ./ods detect --pr-body "## AI Disclosure
+          set -o pipefail
+          ./ods detect --pr-body "## AI Disclosure
           - [x] This PR contains AI-generated code
-          - **AI Tool:** GitHub Copilot" 2>/dev/null
+          - **AI Tool:** GitHub Copilot" --json | jq -e '.ai_generated == true'
 
       # ── AI Code Quality Analysis ──
       - name: Analyze AI-like code

@@ -292,8 +292,12 @@ func TestPipeline_AICode(t *testing.T) {
 	git(t, dir, "commit", "-m", "feat: add widget\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
 
 	t.Run("detect reports AI from commit trailer", func(t *testing.T) {
-		// High-confidence AI detection exits non-zero by design; JSON is still emitted.
-		out, _ := runODS(t, dir, "detect", "--branch", "claude/widget", "--json")
+		// Detection ran, so a positive result is a result, not an error:
+		// exit 0. Gating what it means is `ods check`'s job.
+		out, exit := runODS(t, dir, "detect", "--branch", "claude/widget", "--json")
+		if exit != 0 {
+			t.Errorf("exit = %d, want 0: AI detected is a result, not an error", exit)
+		}
 		var res struct {
 			AIGenerated bool     `json:"ai_generated"`
 			Confidence  float64  `json:"confidence"`

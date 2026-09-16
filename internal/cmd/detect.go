@@ -37,6 +37,9 @@ Signal sources (in order of confidence):
   3. Branch name prefix (claude/, copilot/, cursor/, codeium/, ai-)
   4. Code diff heuristics (comment ratio, naming patterns, error handling)
 
+Exit status is 0 whenever detection ran, whether or not AI was found; it is
+non-zero only when detection itself failed. Use "ods check" to gate merges.
+
 Examples:
   ods detect                                    # detect in HEAD~1..HEAD
   ods detect --diff-base origin/main            # detect against main branch
@@ -128,11 +131,9 @@ func runDetect(cmd *cobra.Command, args []string) error {
 		printSummary(cmd, result)
 	}
 
-	// Exit non-zero if AI code detected with high confidence
-	if result.AIGenerated && result.Confidence >= 0.8 {
-		cmd.SilenceUsage = true
-		return fmt.Errorf("AI-generated code detected with high confidence (%.0f%%)", result.Confidence*100)
-	}
+	// Detection ran, so whatever it found is a result, not an error: exit 0
+	// whether or not AI was detected. Deciding what a positive detection
+	// means for the merge is the policy's job, in `ods check`.
 	return nil
 }
 
