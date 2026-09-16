@@ -610,7 +610,10 @@ A governance view over recent history: how much delivered work is AI-assisted,
 and trending which way. Attribution comes from the `Co-Authored-By` trailers AI
 tools emit automatically and the kernel-style `Assisted-by:` trailers — the
 same signals as `ods detect`. `Assisted-by` commits aggregate under their agent
-name in the per-tool breakdown.
+name in the per-tool breakdown. Tool names are normalized before counting:
+`Claude`, `Claude Fable 5.1` and `Claude Sonnet 4.6` are one tool, as are
+`GitHub Copilot` and `copilot-swe-agent[bot]`; the name as written stays in
+the `ods detect` evidence (`tool: Claude, as written: Claude Sonnet 4.6`).
 
 ```bash
 $ ods report --since "90 days ago"
@@ -620,8 +623,7 @@ ODS AI Attribution Report — since 90 days ago
   Changed lines:  30056 total · 1697 AI-assisted (6%)
 
   By tool:
-    Claude               3 commit(s)
-    Claude Sonnet 4.6    2 commit(s)
+    Claude               5 commit(s)
 
 64 commit(s): 5 AI-assisted (8%), 59 human — AI touched 6% of changed lines
 ```

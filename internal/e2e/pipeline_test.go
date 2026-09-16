@@ -515,6 +515,70 @@ func TestPipeline_CommitScanScopedToDiffBase(t *testing.T) {
 	})
 }
 
+// TestPipeline_ToolNamesAggregate: one tool signs under several names
+// ("Claude Sonnet 4.6", "copilot-swe-agent[bot]"). Reports aggregate under the
+// canonical tool name while detect's evidence keeps the name as written.
+func TestPipeline_ToolNamesAggregate(t *testing.T) {
+	dir := initRepo(t)
+	writeFile(t, dir, "a.go", "package a\n\nfunc A() int { return 1 }\n")
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-m", "feat: a\n\nCo-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>")
+	writeFile(t, dir, "b.go", "package a\n\nfunc B() int { return 2 }\n")
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-m", "feat: b\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
+	writeFile(t, dir, "c.go", "package a\n\nfunc C() int { return 3 }\n")
+	git(t, dir, "add", ".")
+	git(t, dir, "commit", "-m", "feat: c\n\nCo-Authored-By: copilot-swe-agent[bot] <198982749+Copilot@users.noreply.github.com>")
+
+	t.Run("report counts each tool once", func(t *testing.T) {
+		out, exit := runODS(t, dir, "report", "--json")
+		if exit != 0 {
+			t.Fatalf("report exit = %d\n%s", exit, out)
+		}
+		var res struct {
+			AICommits int            `json:"ai_commits"`
+			ByTool    map[string]int `json:"by_tool"`
+		}
+		mustJSON(t, out, &res)
+		if res.AICommits != 3 {
+			t.Errorf("ai_commits = %d, want 3", res.AICommits)
+		}
+		if res.ByTool["Claude"] != 2 || res.ByTool["GitHub Copilot"] != 1 || len(res.ByTool) != 2 {
+			t.Errorf("by_tool = %v, want Claude:2 GitHub Copilot:1 and nothing else", res.ByTool)
+		}
+	})
+
+	t.Run("detect evidence keeps the name as written", func(t *testing.T) {
+		out, exit := runODS(t, dir, "detect", "--diff-base", "HEAD~3", "--branch", "main", "--json")
+		if exit != 0 {
+			t.Errorf("exit = %d, want 0", exit)
+		}
+		var res struct {
+			Evidence []struct {
+				Source string `json:"source"`
+				Value  string `json:"value"`
+			} `json:"evidence"`
+		}
+		mustJSON(t, out, &res)
+		var values []string
+		for _, ev := range res.Evidence {
+			if ev.Source == "commit-trailer" {
+				values = append(values, ev.Value)
+			}
+		}
+		joined := strings.Join(values, "\n")
+		for _, want := range []string{
+			"(tool: Claude, as written: Claude Sonnet 4.6)",
+			"(tool: Claude)",
+			"(tool: GitHub Copilot, as written: copilot-swe-agent[bot])",
+		} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("commit-trailer evidence lacks %q:\n%s", want, joined)
+			}
+		}
+	})
+}
+
 // TestPipeline_KernelAssistedByTrailer verifies the Linux kernel's
 // coding-assistants attribution convention end to end: a commit carrying
 // "Assisted-by: AGENT:MODEL [tools...]" is attributed, with the agent and

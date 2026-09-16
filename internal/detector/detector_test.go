@@ -465,6 +465,18 @@ func TestAITrailerTool(t *testing.T) {
 		{"ai-assisted bare", "docs: d\n\nAI-assisted: true", "AI"},
 		{"human", "feat: human change\n\nCo-Authored-By: Jane Dev <jane@example.com>", ""},
 		{"empty", "", ""},
+		// One tool, many spellings: reports aggregate under one name.
+		{"claude model co-author", "feat: x\n\nCo-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>", "Claude"},
+		{"claude sonnet co-author", "feat: x\n\nCo-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>", "Claude"},
+		{"copilot agent co-author", "fix: y\n\nCo-Authored-By: copilot-swe-agent[bot] <198982749+Copilot@users.noreply.github.com>", "GitHub Copilot"},
+		{"lowercase copilot co-author", "fix: y\n\nCo-Authored-By: copilot <copilot@github.com>", "GitHub Copilot"},
+		{"ai-tool claude code", "chore: z\n\nAI-tool: Claude Code", "Claude"},
+		{"ai-tool unknown stays as written", "chore: z\n\nAI-tool: Gemini CLI", "Gemini CLI"},
+		{"assisted-by lowercase agent", "fix: q\n\nAssisted-by: claude:claude-sonnet-4-6", "Claude"},
+		// A human whose name starts like a tool name is not the tool.
+		{"human aiden", "feat: x\n\nCo-Authored-By: Aiden Smith <aiden@example.com>", ""},
+		{"human claudette", "feat: x\n\nCo-Authored-By: Claudette Roy <claudette@example.com>", ""},
+		{"ai co-author after human", "feat: x\n\nCo-Authored-By: Jane Dev <jane@example.com>\nCo-Authored-By: Claude <noreply@anthropic.com>", "Claude"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
