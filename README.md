@@ -78,6 +78,8 @@ Repos using [git-ai](https://github.com/git-ai-project/git-ai) get the highest-f
 
 This is attribution from signals the tools (or authors) volunteer, not forensic detection: stripping the trailer evades it, and the diff heuristics are only a low-confidence fallback. The aggregate confidence is the strongest signal plus 5% per additional independent source — five attributed commits are one source, not five — and it is capped at 95%: ODS never reports certainty about authorship.
 
+`ods detect` exits 0 whenever detection ran, whether or not AI was found; a non-zero exit means detection itself failed (for example, no git history to read). Deciding what a positive detection means for the merge is the policy's job: gate with `ods check`.
+
 ```bash
 $ ods detect --diff-base origin/main --branch feature/ai-oauth
 🤖  AI code detected — 85% confidence (PR shows AI disclosure)
@@ -608,7 +610,10 @@ A governance view over recent history: how much delivered work is AI-assisted,
 and trending which way. Attribution comes from the `Co-Authored-By` trailers AI
 tools emit automatically and the kernel-style `Assisted-by:` trailers — the
 same signals as `ods detect`. `Assisted-by` commits aggregate under their agent
-name in the per-tool breakdown.
+name in the per-tool breakdown. Tool names are normalized before counting:
+`Claude`, `Claude Fable 5.1` and `Claude Sonnet 4.6` are one tool, as are
+`GitHub Copilot` and `copilot-swe-agent[bot]`; the name as written stays in
+the `ods detect` evidence (`tool: Claude, as written: Claude Sonnet 4.6`).
 
 ```bash
 $ ods report --since "90 days ago"
@@ -618,8 +623,7 @@ ODS AI Attribution Report — since 90 days ago
   Changed lines:  30056 total · 1697 AI-assisted (6%)
 
   By tool:
-    Claude               3 commit(s)
-    Claude Sonnet 4.6    2 commit(s)
+    Claude               5 commit(s)
 
 64 commit(s): 5 AI-assisted (8%), 59 human — AI touched 6% of changed lines
 ```

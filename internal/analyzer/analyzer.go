@@ -264,6 +264,83 @@ var (
 	spaceIndentPattern = regexp.MustCompile(`^    +`)
 )
 
+// literalState is the scanner state that spans lines: the terminator of an
+// open multi-line string (a Go raw string's backtick, a Python triple quote)
+// or an open /* block comment.
+type literalState struct {
+	rawEnd  string
+	inBlock bool
+}
+
+// open reports whether the scanner is inside a multi-line string or block
+// comment at the start of the next line.
+func (s literalState) open() bool { return s.rawEnd != "" || s.inBlock }
+
+// stripLiterals returns line with string and character literals, struct tags
+// and comments removed, so the identifier heuristics only see code. Backslash
+// escapes inside quoted literals are honored; an unterminated quote swallows
+// the rest of the line. Multi-line strings and block comments carry over in st.
+// When only a diff's added lines are analyzed the opening delimiter may be
+// missing, which can hide identifiers but never invent them.
+func stripLiterals(line string, st *literalState) string {
+	var b strings.Builder
+	b.Grow(len(line))
+	i := 0
+	for i < len(line) {
+		rest := line[i:]
+		switch {
+		case st.inBlock:
+			if strings.HasPrefix(rest, "*/") {
+				st.inBlock = false
+				i += 2
+				continue
+			}
+			i++
+		case st.rawEnd != "":
+			if strings.HasPrefix(rest, st.rawEnd) {
+				i += len(st.rawEnd)
+				st.rawEnd = ""
+				continue
+			}
+			i++
+		case strings.HasPrefix(rest, "//"):
+			return b.String()
+		case strings.HasPrefix(rest, "/*"):
+			st.inBlock = true
+			i += 2
+		case rest[0] == '#' && (i == 0 || line[i-1] == ' ' || line[i-1] == '\t'):
+			// A # comment (Python, Ruby, shell, YAML): at the start of the
+			// line or after whitespace, so ${#x} and a[#b] stay code.
+			return b.String()
+		case rest[0] == '`':
+			st.rawEnd = "`"
+			i++
+		case strings.HasPrefix(rest, `"""`) || strings.HasPrefix(rest, `'''`):
+			st.rawEnd = rest[:3]
+			i += 3
+		case rest[0] == '"' || rest[0] == '\'':
+			quote := rest[0]
+			i++
+			for i < len(line) && line[i] != quote {
+				if line[i] == '\\' {
+					i++
+				}
+				i++
+			}
+			i++ // the closing quote, or past the end of an unterminated one
+		default:
+			b.WriteByte(rest[0])
+			i++
+		}
+	}
+	return b.String()
+}
+
+// checkInconsistentPattern flags a file that mixes naming conventions or
+// indentation styles. It only looks at code: string and character literals
+// (and with them Go struct tags) and comments are stripped first, because
+// `json:"ai_commit_share"` is a wire name rather than a snake_case
+// identifier, and a YAML document inside a raw string is not space-indented Go.
 func checkInconsistentPattern(file string, lines []string) []Issue {
 	var issues []Issue
 
@@ -272,18 +349,24 @@ func checkInconsistentPattern(file string, lines []string) []Issue {
 	tabCount := 0
 	spaceCount := 0
 
+	var st literalState
 	for _, line := range lines {
-		// Only check non-comment, non-empty lines
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "#") {
+		insideLiteral := st.open()
+		code := stripLiterals(line, &st)
+		if strings.TrimSpace(code) == "" {
 			continue
 		}
 
-		if camelCasePattern.MatchString(trimmed) {
+		if camelCasePattern.MatchString(code) {
 			camelCount++
 		}
-		if snakeCasePattern.MatchString(trimmed) {
+		if snakeCasePattern.MatchString(code) {
 			snakeCount++
+		}
+		// A line that starts inside a raw string or a block comment is
+		// content, not indented code.
+		if insideLiteral {
+			continue
 		}
 		if tabIndentPattern.MatchString(line) {
 			tabCount++

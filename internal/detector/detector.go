@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/open-delivery-spec/cli/internal/gitai"
 )
@@ -210,56 +212,105 @@ func (r *DetectionResult) aggregate() {
 	}
 }
 
-// knownAICoAuthorPrefixes contains lowercase name prefixes for known AI tools
-// that appear as the name part of Co-Authored-By git trailers.
-// Per ODS spec Module 02, Co-Authored-By is the primary AI attribution signal.
-var knownAICoAuthorPrefixes = []string{
-	"claude",         // Co-Authored-By: Claude <noreply@anthropic.com>  (Claude Code)
-	"github copilot", // Co-Authored-By: GitHub Copilot <copilot@github.com>
-	"copilot",        // Co-Authored-By: copilot[bot] <...>  (variant)
-	"cursor",         // Co-Authored-By: cursor[bot] <cursor@cursor.sh>  (Cursor)
-	"codeium",        // Co-Authored-By: Codeium <noreply@codeium.com>
-	"tabnine",        // Co-Authored-By: tabnine[bot] <...>  (Tabnine)
-	"ai",             // Co-Authored-By: AI  (generic / legacy ODS format)
+// knownAITools maps the lowercase name prefix a tool writes in trailers (the
+// name part of Co-Authored-By, the agent of Assisted-by, an AI-tool value) to
+// the display name reports aggregate under. One tool signs under several
+// names ("Claude", "Claude Fable 5.1", "Claude Sonnet 4.6"; "GitHub Copilot",
+// "copilot-swe-agent[bot]"), and a per-tool breakdown split by model or bot
+// account answers the wrong question. The name as written stays in the
+// evidence detail. Per ODS spec Module 02, Co-Authored-By is the primary AI
+// attribution signal.
+var knownAITools = []struct{ prefix, name string }{
+	{"github copilot", "GitHub Copilot"}, // Co-Authored-By: GitHub Copilot <copilot@github.com>
+	{"copilot", "GitHub Copilot"},        // Co-Authored-By: copilot-swe-agent[bot] <...>
+	{"claude", "Claude"},                 // Co-Authored-By: Claude <noreply@anthropic.com>  (Claude Code)
+	{"cursor", "Cursor"},                 // Co-Authored-By: cursor[bot] <cursor@cursor.sh>
+	{"codeium", "Codeium"},               // Co-Authored-By: Codeium <noreply@codeium.com>
+	{"tabnine", "Tabnine"},               // Co-Authored-By: tabnine[bot] <...>
+	{"ai", "AI"},                         // Co-Authored-By: AI  (generic / legacy ODS format)
+}
+
+// lookupAITool returns the display name for a tool name as written in a
+// trailer and whether it names a known AI tool. The prefix has to end at a
+// word boundary: "Claude Fable 5.1" and "copilot-swe-agent[bot]" match, a
+// human co-author called Aiden or Claudette does not.
+func lookupAITool(raw string) (string, bool) {
+	lower := strings.ToLower(strings.TrimSpace(raw))
+	for _, t := range knownAITools {
+		if hasWordPrefix(lower, t.prefix) {
+			return t.name, true
+		}
+	}
+	return "", false
+}
+
+// canonicalAITool returns the display name for a known AI tool, or the name
+// as written for one ODS does not know.
+func canonicalAITool(raw string) string {
+	if name, ok := lookupAITool(raw); ok {
+		return name
+	}
+	return strings.TrimSpace(raw)
+}
+
+// hasWordPrefix reports whether s starts with prefix and the match ends at a
+// word boundary: the end of s or a character that is not a letter.
+func hasWordPrefix(s, prefix string) bool {
+	if !strings.HasPrefix(s, prefix) {
+		return false
+	}
+	r, _ := utf8.DecodeRuneInString(s[len(prefix):])
+	return r == utf8.RuneError || !unicode.IsLetter(r)
+}
+
+// coAuthorName returns the name part of a Co-Authored-By trailer (the text
+// before the <email>) and whether line is such a trailer.
+func coAuthorName(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(strings.ToLower(trimmed), "co-authored-by:") {
+		return "", false
+	}
+	name := strings.TrimSpace(trimmed[len("co-authored-by:"):])
+	if idx := strings.Index(name, "<"); idx != -1 {
+		name = strings.TrimSpace(name[:idx])
+	}
+	return name, true
 }
 
 // isAICoAuthor returns true if line is a Co-Authored-By trailer referencing a known AI tool.
 func isAICoAuthor(line string) bool {
-	lower := strings.ToLower(strings.TrimSpace(line))
-	if !strings.HasPrefix(lower, "co-authored-by:") {
+	name, ok := coAuthorName(line)
+	if !ok {
 		return false
 	}
-	namePart := strings.TrimSpace(lower[len("co-authored-by:"):])
-	for _, prefix := range knownAICoAuthorPrefixes {
-		if strings.HasPrefix(namePart, prefix) {
-			return true
-		}
-	}
-	return false
+	_, known := lookupAITool(name)
+	return known
 }
 
 // AITrailerTool reports the AI tool attributed in a commit message via its
-// Co-Authored-By or ODS (`AI-tool:`, `AI-assisted: true`) trailers. It returns
-// the tool's display name (e.g. "Claude", "GitHub Copilot"), the generic "AI"
-// when attribution is present but unnamed, or "" when the message shows no AI
-// attribution. This is the building block for AI-vs-human reporting.
+// Co-Authored-By, Assisted-by or ODS (`AI-tool:`, `AI-assisted: true`)
+// trailers. It returns the tool's canonical display name ("Claude" for a
+// "Claude Sonnet 4.6" co-author, "GitHub Copilot" for "copilot-swe-agent[bot]"),
+// the generic "AI" when attribution is present but unnamed, or "" when the
+// message shows no AI attribution. This is the building block for AI-vs-human
+// reporting, so every spelling of one tool has to land in one bucket.
 func AITrailerTool(message string) string {
 	for _, line := range strings.Split(message, "\n") {
 		line = strings.TrimSpace(line)
-		if isAICoAuthor(line) {
-			if tool := extractCoAuthorTool(line); tool != "" {
+		if name, ok := coAuthorName(line); ok {
+			if tool, known := lookupAITool(name); known {
 				return tool
 			}
-			return "AI"
+			continue
 		}
 		// Linux kernel convention (Assisted-by: AGENT:MODEL [tools...]).
 		// Aggregate by agent name; the model version stays in evidence detail.
 		if agent, _, ok := parseAssistedBy(line); ok {
-			return agent
+			return canonicalAITool(agent)
 		}
 		lower := strings.ToLower(line)
 		if strings.HasPrefix(lower, "ai-tool:") {
-			if tool := strings.TrimSpace(line[len("ai-tool:"):]); tool != "" {
+			if tool := canonicalAITool(line[len("ai-tool:"):]); tool != "" {
 				return tool
 			}
 			return "AI"
@@ -291,19 +342,6 @@ func parseAssistedBy(line string) (agent, model string, ok bool) {
 	}
 	agent, model, _ = strings.Cut(strings.Fields(rest)[0], ":")
 	return agent, model, agent != ""
-}
-
-// extractCoAuthorTool extracts the display name from a Co-Authored-By trailer.
-func extractCoAuthorTool(line string) string {
-	lower := strings.ToLower(strings.TrimSpace(line))
-	if !strings.HasPrefix(lower, "co-authored-by:") {
-		return ""
-	}
-	name := strings.TrimSpace(line[len("co-authored-by:"):])
-	if idx := strings.Index(name, "<"); idx != -1 {
-		name = strings.TrimSpace(name[:idx])
-	}
-	return name
 }
 
 // commitRecord is one scanned commit: its short hash (empty when the message
@@ -480,30 +518,37 @@ func detectFromCommits(opts Options) ([]Evidence, []string) {
 		lines := strings.Split(commit, "\n")
 
 		hasAI := false
-		var aiTool, aiModel, aiScope string
+		// aiTool is the canonical display name; aiToolRaw the name as written,
+		// kept in the evidence so the model or bot account stays auditable.
+		var aiTool, aiToolRaw, aiModel, aiScope string
 
 		for _, line := range lines {
 			line = strings.TrimSpace(line)
 			if strings.EqualFold(line, "AI-assisted: true") ||
-				strings.EqualFold(line, "AI-generated: true") ||
-				isAICoAuthor(line) {
+				strings.EqualFold(line, "AI-generated: true") {
 				hasAI = true
-				if tool := extractCoAuthorTool(line); tool != "" && aiTool == "" {
-					aiTool = tool
+			}
+			if name, ok := coAuthorName(line); ok {
+				if tool, known := lookupAITool(name); known {
+					hasAI = true
+					if aiTool == "" {
+						aiTool, aiToolRaw = tool, name
+					}
 				}
 			}
 			// Linux kernel convention: Assisted-by: AGENT:MODEL [tools...]
 			if agent, model, ok := parseAssistedBy(line); ok {
 				hasAI = true
 				if aiTool == "" {
-					aiTool = agent
+					aiTool, aiToolRaw = canonicalAITool(agent), agent
 				}
 				if aiModel == "" {
 					aiModel = model
 				}
 			}
 			if strings.HasPrefix(strings.ToLower(line), "ai-tool:") {
-				aiTool = strings.TrimSpace(line[len("ai-tool:"):])
+				raw := strings.TrimSpace(line[len("ai-tool:"):])
+				aiTool, aiToolRaw = canonicalAITool(raw), raw
 				hasAI = true
 			}
 			if strings.HasPrefix(strings.ToLower(line), "ai-scope:") {
@@ -522,6 +567,9 @@ func detectFromCommits(opts Options) ([]Evidence, []string) {
 				value += fmt.Sprintf(" (tool: %s", aiTool)
 				if aiModel != "" {
 					value += fmt.Sprintf(", model: %s", aiModel)
+				}
+				if !strings.EqualFold(aiToolRaw, aiTool) {
+					value += fmt.Sprintf(", as written: %s", aiToolRaw)
 				}
 				value += ")"
 			}

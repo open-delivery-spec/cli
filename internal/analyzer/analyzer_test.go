@@ -180,6 +180,152 @@ func TestCheckInconsistentPattern(t *testing.T) {
 			}
 		}
 	})
+
+	// Wire names in struct tags, strings and comments are not identifiers:
+	// a Go file whose JSON keys are snake_case is still consistent camelCase.
+	t.Run("struct tags, strings and comments are not identifiers", func(t *testing.T) {
+		lines := []string{
+			"type Report struct {",
+			"\tAICommitShare float64 `json:\"ai_commit_share\"`",
+			"\tAILineShare   float64 `json:\"ai_line_share\"`",
+			"\tTotalCommits  int     `json:\"total_commits\"`",
+			"\tHumanCommits  int     `json:\"human_commits\"`",
+			"}",
+			"func (r Report) key() string { return \"by_tool\" }",
+			"func newReport(sinceDate string) Report { return Report{} }",
+			"func mergeInto(byTool map[string]int, orgName string) int { return 0 }",
+			"func aiShare(aiCommits, totalCommits int) float64 { return 0 } // was ai_share",
+			"func lineShare(aiLines, totalLines int) float64 { return 0 } /* not line_share */",
+			"func toolName(rawName string) string { return rawName + 'x' }",
+		}
+		for _, issue := range checkInconsistentPattern("report.go", lines) {
+			if strings.Contains(issue.Message, "Mixed naming conventions") {
+				t.Errorf("wire names in tags, strings and comments counted as identifiers: %s", issue.Message)
+			}
+		}
+	})
+
+	t.Run("mixed identifiers outside literals are still flagged", func(t *testing.T) {
+		lines := []string{
+			"user_name := \"userName\"",
+			"userEmail := \"user_email\"",
+			"user_age := 30",
+			"displayName := \"display_name\"",
+			"phone_number := \"phoneNumber\"",
+			"emailAddress := \"email_address\"",
+		}
+		found := false
+		for _, issue := range checkInconsistentPattern("mixed.go", lines) {
+			if strings.Contains(issue.Message, "Mixed naming conventions") {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("expected mixed naming issue: the identifiers, not the strings, are mixed")
+		}
+	})
+
+	// A YAML or Rego document embedded in a raw string is content: its
+	// space indentation says nothing about the Go around it.
+	t.Run("embedded document in a raw string is not indented code", func(t *testing.T) {
+		lines := []string{
+			"package policy",
+			"",
+			"const fixture = `",
+			"    rules:",
+			"      - name: a",
+			"      - name: b",
+			"    deny:",
+			"      - x",
+			"      - y",
+			"`",
+			"",
+			"func load() string {",
+			"\tif fixture == \"\" {",
+			"\t\treturn \"\"",
+			"\t}",
+			"\treturn fixture",
+			"}",
+		}
+		for _, issue := range checkInconsistentPattern("policy.go", lines) {
+			if strings.Contains(issue.Message, "Mixed indentation") {
+				t.Errorf("raw string content counted as indented code: %s", issue.Message)
+			}
+		}
+	})
+
+	t.Run("mixed indentation in code is still flagged", func(t *testing.T) {
+		lines := []string{
+			"func a() {",
+			"\tx := 1",
+			"\ty := 2",
+			"\tz := 3",
+			"    p := 4",
+			"    q := 5",
+			"    r := 6",
+			"}",
+		}
+		found := false
+		for _, issue := range checkInconsistentPattern("mixed.go", lines) {
+			if strings.Contains(issue.Message, "Mixed indentation") {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("expected mixed indentation issue for tab and space indented code")
+		}
+	})
+}
+
+func TestStripLiterals(t *testing.T) {
+	t.Run("single line", func(t *testing.T) {
+		cases := []struct{ in, want string }{
+			{`x := "a_b c_d" // e_f`, "x :=  "},
+			{"tag := `json:\"a_b\"`", "tag := "},
+			{`r := 'x'`, "r := "},
+			{`s := "esc \" q_r"; t := u_v`, "s := ; t := u_v"},
+			{`s := 'it\'s'; t := 1`, "s := ; t := 1"},
+			{`y = 1  # k_v`, "y = 1  "},
+			{`n := len(arr[#idx]) + ${#x}`, "n := len(arr[#idx]) + ${#x}"},
+			{`#include <a_b.h>`, ""},
+			{`a := b /* c_d */ + e_f`, "a := b  + e_f"},
+			{`unterminated := "a_b`, "unterminated := "},
+			{`plain_code := camelCase`, "plain_code := camelCase"},
+		}
+		for _, c := range cases {
+			var st literalState
+			if got := stripLiterals(c.in, &st); got != c.want {
+				t.Errorf("stripLiterals(%q) = %q, want %q", c.in, got, c.want)
+			}
+			if st.open() {
+				t.Errorf("stripLiterals(%q) left a literal open", c.in)
+			}
+		}
+	})
+
+	t.Run("multi-line state", func(t *testing.T) {
+		cases := []struct {
+			name string
+			in   []string
+			want []string
+		}{
+			{"raw string", []string{"a := `", "  x_y", "` + b_c"}, []string{"a := ", "", " + b_c"}},
+			{"block comment", []string{"/* p_q", "r_s */ t_u"}, []string{"", " t_u"}},
+			{"triple quote", []string{`s = """doc a_b`, "c_d", `e_f """ + g_h`}, []string{"s = ", "", " + g_h"}},
+			{"struct tags stay single-line", []string{"A int `json:\"a_b\"`", "b_c := 1"}, []string{"A int ", "b_c := 1"}},
+		}
+		for _, c := range cases {
+			var st literalState
+			for i, line := range c.in {
+				if got := stripLiterals(line, &st); got != c.want[i] {
+					t.Errorf("%s line %d: stripLiterals(%q) = %q, want %q", c.name, i, line, got, c.want[i])
+				}
+			}
+			if st.open() {
+				t.Errorf("%s: literal still open after the last line", c.name)
+			}
+		}
+	})
 }
 
 func TestCheckHallucinatedAPI(t *testing.T) {
