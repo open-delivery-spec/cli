@@ -8,6 +8,10 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  pull-requests: write  # the ODS comment, the review-tier label, reviewer requests
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -63,3 +67,9 @@ jobs:
           cli-ref: ${{ github.event.pull_request.head.sha }}
           summary: 'true'
           comment: 'true'
+          # The policy is the open-source disclosure template from the spec
+          # (examples/ods-policy-oss-disclosure.rego, copied to .ods/policy.rego):
+          # disclose it, test it, own it. Review routing labels the PR with its
+          # tier and asks a maintainer to look at changes the policy marks elevated.
+          review-routing: 'true'
+          elevated-reviewers: 'shenxianpeng'
