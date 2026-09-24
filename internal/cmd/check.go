@@ -38,6 +38,7 @@ Place a policy at .ods/policy.rego:
 
   deny[msg] {
       input.ai_confidence > 0.8
+      input.test_coverage >= 0   # -1 means not measured
       input.test_coverage < 0.3
       msg = "AI code with low test coverage"
   }

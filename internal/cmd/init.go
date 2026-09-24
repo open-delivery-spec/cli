@@ -81,7 +81,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	fmt.Println("Next steps:")
 	fmt.Println("  1. Edit .ods/policy.rego — it starts as the built-in default policy")
-	fmt.Println("  2. Optional: run the same check before you push with the pre-commit hook")
+	fmt.Println("  2. Optional: run the built-in analysis before you push with the pre-commit hook")
 	fmt.Println("     (see .pre-commit-hooks.yaml in github.com/open-delivery-spec/cli)")
 	fmt.Println("  3. Commit and push — ODS will run on your next PR")
 
