@@ -1,0 +1,23 @@
+internal/detector/detector_test.go
+  s_9433bfadf9b69b::t_20df887a1610e8 474-484,561-601
+internal/detector/detector.go
+  s_9433bfadf9b69b::t_5aa2c951c91ee7 230-232,293-322,354-359,596-604,649
+README.md
+  s_9433bfadf9b69b::t_8d7b1a84621778 77-78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3480c6436ce402da6060ec4fef99a56bbe1b7e80",
+  "prompts": {},
+  "sessions": {
+    "s_9433bfadf9b69b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4cfc4c8c-e4c8-40b0-8e4d-1acb19fe3770",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "shenxianpeng <xianpeng.shen@gmail.com>"
+    }
+  }
+}
