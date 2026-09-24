@@ -471,7 +471,17 @@ func TestAITrailerTool(t *testing.T) {
 		{"copilot agent co-author", "fix: y\n\nCo-Authored-By: copilot-swe-agent[bot] <198982749+Copilot@users.noreply.github.com>", "GitHub Copilot"},
 		{"lowercase copilot co-author", "fix: y\n\nCo-Authored-By: copilot <copilot@github.com>", "GitHub Copilot"},
 		{"ai-tool claude code", "chore: z\n\nAI-tool: Claude Code", "Claude"},
-		{"ai-tool unknown stays as written", "chore: z\n\nAI-tool: Gemini CLI", "Gemini CLI"},
+		{"ai-tool unknown stays as written", "chore: z\n\nAI-tool: Amp", "Amp"},
+		// Trailers other tools and projects emit.
+		{"codex co-author", "feat: x\n\nCo-authored-by: Codex <noreply@openai.com>", "Codex"},
+		{"gemini co-author", "feat: x\n\nCo-authored-by: Gemini <gemini-code-assist@google.com>", "Gemini"},
+		{"cursor made-with", "feat: x\n\nMade-with: Cursor", "Cursor"},
+		{"asf generated-by", "feat: x\n\nGenerated-by: GitHub Copilot", "GitHub Copilot"},
+		{"claude session trailer", "feat: x\n\nClaude-Session: https://claude.ai/code/session_01AbC", "Claude"},
+		{"qemu ai-used-for", "feat: x\n\nAI-used-for: tests", "AI"},
+		// Code generators use Generated-by too; only a known AI tool counts.
+		{"generated-by code generator", "chore: regen\n\nGenerated-by: protoc-gen-go", ""},
+		{"made-with not a tool", "docs: x\n\nMade-with: love", ""},
 		{"assisted-by lowercase agent", "fix: q\n\nAssisted-by: claude:claude-sonnet-4-6", "Claude"},
 		// A human whose name starts like a tool name is not the tool.
 		{"human aiden", "feat: x\n\nCo-Authored-By: Aiden Smith <aiden@example.com>", ""},
@@ -546,5 +556,46 @@ func TestEvidenceTier(t *testing.T) {
 				t.Errorf("EvidenceTier(%v) = %q, want %q", tc.sources, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestDetectFromCommits_OtherTrailers covers attribution trailers written by
+// tools and projects other than the Co-Authored-By default: Cursor's
+// Made-with, the ASF's Generated-by, Claude Code's session link and QEMU's
+// AI-used-for, which also records what the AI was used for.
+func TestDetectFromCommits_OtherTrailers(t *testing.T) {
+	cases := []struct {
+		name, msg string
+		wantAI    bool
+		wantValue string
+	}{
+		{"made-with cursor", "feat: x\n\nMade-with: Cursor\n", true, "tool: Cursor"},
+		{"generated-by", "feat: x\n\nGenerated-by: Claude Code\n", true, "tool: Claude"},
+		{"claude session", "feat: x\n\nClaude-Session: https://claude.ai/code/session_01AbC\n", true, "tool: Claude"},
+		{"ai-used-for", "feat: x\n\nAI-used-for: code, tests\n", true, "[scope: code, tests]"},
+		{"generated-by generator", "chore: x\n\nGenerated-by: stringer\n", false, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Chdir(dir) // not a git repository: the message file is scanned
+			msgFile := filepath.Join(dir, "COMMIT_EDITMSG")
+			if err := os.WriteFile(msgFile, []byte(c.msg), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			ev, _ := detectFromCommits(Options{CommitMessageFile: msgFile, MaxCommits: 1})
+			if got := len(ev) > 0; got != c.wantAI {
+				t.Fatalf("AI attributed = %t, want %t (evidence %v)", got, c.wantAI, ev)
+			}
+			if c.wantAI && !strings.Contains(ev[0].Value, c.wantValue) {
+				t.Errorf("evidence %q should contain %q", ev[0].Value, c.wantValue)
+			}
+		})
+	}
+}
+
+func TestDetectFromBranch_codex(t *testing.T) {
+	if ev := detectFromBranch("codex/fix-flaky-test"); ev == nil {
+		t.Fatal("detectFromBranch('codex/fix-flaky-test') returned nil, want evidence")
 	}
 }
