@@ -1,0 +1,27 @@
+internal/cmd/check.go
+  s_9433bfadf9b69b::t_c653e0168f0bea 41
+internal/cmd/detect.go
+  s_9433bfadf9b69b::t_c653e0168f0bea 35-40
+internal/cmd/init.go
+  s_9433bfadf9b69b::t_c653e0168f0bea 84
+README.md
+  s_9433bfadf9b69b::t_c653e0168f0bea 530
+.pre-commit-hooks.yaml
+  s_9433bfadf9b69b::t_c653e0168f0bea 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3a59b3b004a5b17fe53c09bda86662aa2c193a1c",
+  "prompts": {},
+  "sessions": {
+    "s_9433bfadf9b69b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4cfc4c8c-e4c8-40b0-8e4d-1acb19fe3770",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "shenxianpeng <xianpeng.shen@gmail.com>"
+    }
+  }
+}
