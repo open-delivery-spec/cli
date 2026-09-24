@@ -1,0 +1,26 @@
+internal/cmd/detect.go
+  s_9433bfadf9b69b::t_53def1436e62d1 78-80,82-83,179-213
+  s_9433bfadf9b69b::t_d01aa9a074c7d7 214
+internal/cmd/pipeline.go
+  s_9433bfadf9b69b::t_8e389a97c3a34c 36-43
+internal/cmd/cmd_test.go
+  s_9433bfadf9b69b::t_8b494914a132ee 847-907
+README.md
+  s_9433bfadf9b69b::t_5ed397366345e3 287-290
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "84b9af88887c5b153863a70b3c05dbba9cf96e0e",
+  "prompts": {},
+  "sessions": {
+    "s_9433bfadf9b69b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4cfc4c8c-e4c8-40b0-8e4d-1acb19fe3770",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "shenxianpeng <xianpeng.shen@gmail.com>"
+    }
+  }
+}
