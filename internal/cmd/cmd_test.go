@@ -844,3 +844,64 @@ func TestRunCheck_InputReportsBadDocument(t *testing.T) {
 		})
 	}
 }
+
+// TestRunCheck_PRBodyReachesPolicy proves the PR description reaches the gate
+// the same way it reaches `ods detect`: ticking the disclosure box must show
+// up as the pr-body detection source in the policy input.
+func TestRunCheck_PRBodyReachesPolicy(t *testing.T) {
+	t.Cleanup(func() { checkPolicyFile, checkJSON = "", false })
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("ODS_PR_BODY", "## AI Disclosure\n- [x] This PR contains AI-generated code\n")
+	t.Setenv("ODS_BRANCH", "claude/add-feature")
+	policyPath := filepath.Join(dir, "policy.rego")
+	mustWrite(t, policyPath, `package ods.policy
+default allow := true
+deny[msg] {
+    src := input.detection_sources[_]
+    src == "pr-body"
+    msg := "pr-body disclosed"
+}
+deny[msg] {
+    src := input.detection_sources[_]
+    src == "branch-name"
+    msg := "branch-name seen"
+}`)
+	checkPolicyFile = policyPath
+	checkJSON = true
+
+	c, buf := bufCmd()
+	_ = runCheck(c, nil)
+	var res policy.EvalResult
+	if err := json.Unmarshal(buf.Bytes(), &res); err != nil {
+		t.Fatalf("check output not valid JSON: %v\n%s", err, buf.String())
+	}
+	for _, want := range []string{"pr-body disclosed", "branch-name seen"} {
+		found := false
+		for _, d := range res.Denials {
+			if d == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("denials %v: want %q — the signal never reached the policy input", res.Denials, want)
+		}
+	}
+}
+
+func TestResolveBranch(t *testing.T) {
+	for _, name := range []string{"ODS_BRANCH", "ODS_BRANCH_NAME", "GITHUB_HEAD_REF"} {
+		t.Setenv(name, "")
+	}
+	t.Setenv("GITHUB_HEAD_REF", "copilot/fix")
+	if got := resolveBranch(""); got != "copilot/fix" {
+		t.Errorf("resolveBranch fell back to %q, want GITHUB_HEAD_REF", got)
+	}
+	t.Setenv("ODS_BRANCH", "claude/x")
+	if got := resolveBranch(""); got != "claude/x" {
+		t.Errorf("resolveBranch = %q, want ODS_BRANCH to win over GITHUB_HEAD_REF", got)
+	}
+	if got := resolveBranch("feature/y"); got != "feature/y" {
+		t.Errorf("resolveBranch = %q, want the flag to win", got)
+	}
+}

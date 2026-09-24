@@ -284,7 +284,10 @@ it participated) — it's not the maintainer's job to guess. ODS makes that norm
 checkable at the gate. The policy input carries `detection_sources` — which
 signals fired (`commit-trailer`, `git-ai-notes`, `pr-body`, `branch-name`,
 `diff-heuristics`) — so a policy can separate *disclosed* AI use from merely
-*suspected* AI use:
+*suspected* AI use. `ods check`, `ods score` and `ods attest` read the PR
+description from `ODS_PR_BODY` and the branch from `ODS_BRANCH` /
+`GITHUB_HEAD_REF` / the checkout, exactly as `ods detect` does, so a ticked
+disclosure box counts at the gate:
 
 ```rego
 ai_disclosed { input.detection_sources[_] == "commit-trailer" }

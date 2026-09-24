@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/open-delivery-spec/cli/internal/analyzer"
 	"github.com/open-delivery-spec/cli/internal/coverage"
@@ -34,15 +33,14 @@ func runPipeline(cmd *cobra.Command, diffBase, sarifPath, coverageFile string) p
 	p := pipelineRun{Base: diffBase}
 
 	detectOpts := detector.Options{DiffBase: diffBase, MaxCommits: 10}
-	p.Branch = detectBranch
-	if p.Branch == "" {
-		p.Branch = os.Getenv("ODS_BRANCH")
-	}
-	if p.Branch == "" {
-		p.Branch = os.Getenv("ODS_BRANCH_NAME")
-	}
-	if p.Branch != "" {
-		detectOpts.BranchName = p.Branch
+	// The branch and the PR description resolve exactly as in `ods detect`,
+	// so a disclosure the detect stage sees also reaches the policy input.
+	p.Branch = resolveBranch(detectBranch)
+	detectOpts.BranchName = p.Branch
+	if body, err := resolvePRBody(detectPRBody, detectPRFile); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %v\n", err)
+	} else {
+		detectOpts.PRBody = body
 	}
 	detectResult, err := detector.Detect(detectOpts)
 	if err != nil {

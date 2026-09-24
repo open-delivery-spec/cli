@@ -75,35 +75,12 @@ func runDetect(cmd *cobra.Command, args []string) error {
 		MaxCommits: detectCommits,
 	}
 
-	// PR body from flag, file, or env
-	if detectPRBody != "" {
-		opts.PRBody = detectPRBody
-	} else if detectPRFile != "" {
-		data, err := os.ReadFile(detectPRFile)
-		if err != nil {
-			return fmt.Errorf("reading PR file %s: %w", detectPRFile, err)
-		}
-		opts.PRBody = string(data)
-	} else {
-		opts.PRBody = readEnvStr("ODS_PR_BODY")
+	prBody, err := resolvePRBody(detectPRBody, detectPRFile)
+	if err != nil {
+		return err
 	}
-
-	// Branch name from flag, env, or auto-detect from git
-	// Checks ODS_BRANCH first (used by validate-action), then ODS_BRANCH_NAME, then GITHUB_HEAD_REF
-	if detectBranch != "" {
-		opts.BranchName = detectBranch
-	} else if branch := readEnvStr("ODS_BRANCH"); branch != "" {
-		opts.BranchName = branch
-	} else if branch := readEnvStr("ODS_BRANCH_NAME"); branch != "" {
-		opts.BranchName = branch
-	} else if branch := readEnvStr("GITHUB_HEAD_REF"); branch != "" {
-		opts.BranchName = branch
-	} else {
-		out, err := gitOut("branch", "--show-current")
-		if err == nil {
-			opts.BranchName = strings.TrimSpace(out)
-		}
-	}
+	opts.PRBody = prBody
+	opts.BranchName = resolveBranch(detectBranch)
 
 	logx.Debugf("detect: diff base=%s branch=%q max commits=%d", opts.DiffBase, opts.BranchName, opts.MaxCommits)
 
@@ -197,6 +174,42 @@ func printDetailed(cmd *cobra.Command, result *detector.DetectionResult) {
 		risk = "Medium"
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Risk Level: %s\n", risk)
+}
+
+// resolvePRBody returns the pull request description from --pr-body, then
+// --pr-file, then ODS_PR_BODY. Every command that attributes a change reads
+// it the same way, so a ticked disclosure box reaches the gate, not only
+// `ods detect`.
+func resolvePRBody(body, file string) (string, error) {
+	if body != "" {
+		return body, nil
+	}
+	if file != "" {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return "", fmt.Errorf("reading PR file %s: %w", file, err)
+		}
+		return string(data), nil
+	}
+	return readEnvStr("ODS_PR_BODY"), nil
+}
+
+// resolveBranch returns the branch name from --branch, then ODS_BRANCH (set
+// by validate-action), ODS_BRANCH_NAME, GITHUB_HEAD_REF, and finally the
+// checked-out branch.
+func resolveBranch(flag string) string {
+	if flag != "" {
+		return flag
+	}
+	for _, name := range []string{"ODS_BRANCH", "ODS_BRANCH_NAME", "GITHUB_HEAD_REF"} {
+		if v := readEnvStr(name); v != "" {
+			return v
+		}
+	}
+	if out, err := gitOut("branch", "--show-current"); err == nil {
+		return strings.TrimSpace(out)
+	}
+	return ""
 }
 
 func readEnvStr(name string) string {
