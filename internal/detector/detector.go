@@ -227,6 +227,9 @@ var knownAITools = []struct{ prefix, name string }{
 	{"cursor", "Cursor"},                 // Co-Authored-By: cursor[bot] <cursor@cursor.sh>
 	{"codeium", "Codeium"},               // Co-Authored-By: Codeium <noreply@codeium.com>
 	{"tabnine", "Tabnine"},               // Co-Authored-By: tabnine[bot] <...>
+	{"codex", "Codex"},                   // Co-authored-by: Codex <noreply@openai.com>  (Codex CLI)
+	{"gemini", "Gemini"},                 // Co-authored-by: Gemini <...>  (Gemini CLI, Code Assist)
+	{"chatgpt", "ChatGPT"},               // Generated-by: ChatGPT
 	{"ai", "AI"},                         // Co-Authored-By: AI  (generic / legacy ODS format)
 }
 
@@ -287,6 +290,36 @@ func isAICoAuthor(line string) bool {
 	return known
 }
 
+// toolTrailer recognizes the attribution trailers other tools and projects
+// write, and returns the tool name as written ("" when the trailer marks AI
+// use without naming a tool):
+//
+//	Made-with: Cursor                  (Cursor's default)
+//	Generated-by: <tool>               (Apache Software Foundation guidance)
+//	Claude-Session: <url>              (Claude Code's session link)
+//	AI-used-for: code|tests|docs|...   (QEMU)
+//
+// Code generators and people also write Made-with and Generated-by, so those
+// two count only when they name a known AI tool. scope is the AI-used-for
+// value, what the AI was used for.
+func toolTrailer(line string) (raw, scope string, ok bool) {
+	lower := strings.ToLower(line)
+	for _, key := range []string{"made-with:", "generated-by:"} {
+		if strings.HasPrefix(lower, key) {
+			raw = strings.TrimSpace(line[len(key):])
+			_, known := lookupAITool(raw)
+			return raw, "", known
+		}
+	}
+	if strings.HasPrefix(lower, "claude-session:") {
+		return "Claude", "", true
+	}
+	if strings.HasPrefix(lower, "ai-used-for:") {
+		return "", strings.TrimSpace(line[len("ai-used-for:"):]), true
+	}
+	return "", "", false
+}
+
 // AITrailerTool reports the AI tool attributed in a commit message via its
 // Co-Authored-By, Assisted-by or ODS (`AI-tool:`, `AI-assisted: true`)
 // trailers. It returns the tool's canonical display name ("Claude" for a
@@ -317,6 +350,12 @@ func AITrailerTool(message string) string {
 		}
 		if strings.EqualFold(line, "ai-assisted: true") || strings.EqualFold(line, "ai-generated: true") {
 			return "AI"
+		}
+		if raw, _, ok := toolTrailer(line); ok {
+			if raw == "" {
+				return "AI"
+			}
+			return canonicalAITool(raw)
 		}
 	}
 	return ""
@@ -554,6 +593,15 @@ func detectFromCommits(opts Options) ([]Evidence, []string) {
 			if strings.HasPrefix(strings.ToLower(line), "ai-scope:") {
 				aiScope = strings.TrimSpace(line[len("ai-scope:"):])
 			}
+			if raw, scope, ok := toolTrailer(line); ok {
+				hasAI = true
+				if aiTool == "" && raw != "" {
+					aiTool, aiToolRaw = canonicalAITool(raw), raw
+				}
+				if aiScope == "" && scope != "" {
+					aiScope = scope
+				}
+			}
 		}
 
 		if hasAI {
@@ -598,6 +646,7 @@ var knownAIToolBranchNames = []string{
 	"copilot", // GitHub Copilot: copilot/<description>
 	"cursor",  // Cursor: cursor/<description>
 	"codeium", // Codeium: codeium/<description>
+	"codex",   // OpenAI Codex cloud tasks: codex/<description>
 }
 
 // detectFromBranch checks if the branch name indicates AI-generated code.
