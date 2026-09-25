@@ -32,10 +32,12 @@ Detection uses multiple independent signal sources and outputs a
 confidence score — without requiring developer self-disclosure.
 
 Signal sources (in order of confidence):
-  1. Git commit trailers (Co-Authored-By: <ai-tool>)
-  2. PR description AI disclosure section
-  3. Branch name prefix (claude/, copilot/, cursor/, codeium/, ai-)
-  4. Code diff heuristics (comment ratio, naming patterns, error handling)
+  1. git-ai authorship notes (refs/notes/ai), when present
+  2. Commit trailers (Co-Authored-By: <ai-tool>, Assisted-by: AGENT:MODEL)
+  3. PR description AI disclosure section
+  4. Branch name prefix (claude/, copilot/, cursor/, codeium/, ai-)
+  5. Code diff heuristics (comment ratio, naming patterns, error handling),
+     only when nothing attests the change
 
 Exit status is 0 whenever detection ran, whether or not AI was found; it is
 non-zero only when detection itself failed. Use "ods check" to gate merges.

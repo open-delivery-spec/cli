@@ -530,7 +530,7 @@ every commit — the same analysis CI runs, but before you push — with one ent
 # .pre-commit-config.yaml
 repos:
   - repo: https://github.com/open-delivery-spec/cli
-    rev: v0.7.4
+    rev: v0.7.9
     hooks:
       - id: ods-analyze          # blocks the commit on high/critical findings
 ```
