@@ -1,0 +1,23 @@
+internal/coverage/coverage.go
+  s_66212c309e21f0::t_315b36e97691a5 402-404
+internal/coverage/coverage_test.go
+  s_66212c309e21f0::t_b4c9e858c93970 266-267,270,272-280
+  s_66212c309e21f0::t_0f5995b5bd47ee 268-269,271
+  s_66212c309e21f0::t_49026ca5f939bf 7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2b2728646edf9bddd347bb272e0db13e7cfc95c0",
+  "prompts": {},
+  "sessions": {
+    "s_66212c309e21f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8763d161-5362-48a1-ae9b-11f7bcd83469",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "shenxianpeng <xianpeng.shen@gmail.com>"
+    }
+  }
+}
