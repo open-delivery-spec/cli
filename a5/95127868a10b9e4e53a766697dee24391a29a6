@@ -1,0 +1,21 @@
+internal/evidence/evidence.go
+  s_66212c309e21f0::t_ff69de8da0080d 153-154,156
+internal/evidence/evidence_test.go
+  s_66212c309e21f0::t_300ca1e44147ff 196-239
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a595127868a10b9e4e53a766697dee24391a29a6",
+  "prompts": {},
+  "sessions": {
+    "s_66212c309e21f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8763d161-5362-48a1-ae9b-11f7bcd83469",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "shenxianpeng <xianpeng.shen@gmail.com>"
+    }
+  }
+}
