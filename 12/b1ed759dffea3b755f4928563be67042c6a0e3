@@ -1,0 +1,21 @@
+internal/gitai/gitai.go
+  s_66212c309e21f0::t_64cb425ddcc44f 68-70
+internal/gitai/gitai_range_test.go
+  s_66212c309e21f0::t_712fb7661abca8 344-380
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "12b1ed759dffea3b755f4928563be67042c6a0e3",
+  "prompts": {},
+  "sessions": {
+    "s_66212c309e21f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8763d161-5362-48a1-ae9b-11f7bcd83469",
+        "model": "unknown"
+      },
+      "human_author": "shenxianpeng <xianpeng.shen@gmail.com>"
+    }
+  }
+}
