@@ -599,3 +599,21 @@ func TestDetectFromBranch_codex(t *testing.T) {
 		t.Fatal("detectFromBranch('codex/fix-flaky-test') returned nil, want evidence")
 	}
 }
+
+// TestIsAICoAuthor: a Co-Authored-By trailer counts only when its name is a
+// known AI tool; human co-authors, look-alike names and other trailers do not.
+func TestIsAICoAuthor(t *testing.T) {
+	cases := map[string]bool{
+		"Co-Authored-By: Claude <noreply@anthropic.com>":           true,
+		"  co-authored-by: copilot-swe-agent[bot] <x@github.com>":  true,
+		"Co-Authored-By: Claudette Dupont <claudette@example.com>": false,
+		"Co-Authored-By: Dana Dev <dana@example.com>":              false,
+		"Assisted-by: claude:sonnet":                               false,
+		"":                                                         false,
+	}
+	for line, want := range cases {
+		if got := isAICoAuthor(line); got != want {
+			t.Errorf("isAICoAuthor(%q) = %v, want %v", line, got, want)
+		}
+	}
+}

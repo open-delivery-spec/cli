@@ -37,7 +37,9 @@ func TestMain(m *testing.M) {
 
 // hermeticEnv returns a process environment with deterministic git identity and
 // with any ODS_*/GITHUB_* variables stripped, so detection results depend only on
-// the fixture repo and explicit flags — not on the host or CI environment.
+// the fixture repo and explicit flags — not on the host or CI environment. The
+// global and system git config are ignored too: a developer's global hook,
+// commit signing or trace2 target must not act on the fixture repositories.
 func hermeticEnv() []string {
 	var env []string
 	for _, kv := range os.Environ() {
@@ -49,6 +51,7 @@ func hermeticEnv() []string {
 	env = append(env,
 		"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
 		"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
+		"GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1",
 	)
 	return env
 }
