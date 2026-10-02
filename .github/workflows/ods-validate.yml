@@ -29,6 +29,7 @@ jobs:
           # synthetic merge commit, and it resolves for pull requests from
           # forks too — github.head_ref is a branch that exists only in the fork.
           ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
 
       - name: Conventional branch & commit checks
         run: |
