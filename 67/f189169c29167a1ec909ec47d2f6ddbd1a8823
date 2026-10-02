@@ -1,0 +1,73 @@
+cmd/ods/main_test.go
+  s_66212c309e21f0::t_79b87e5689180d 1-32
+internal/analyzer/analyzer_test.go
+  s_66212c309e21f0::t_7940be9a738a97 4-6,9-10,505-1102
+internal/cmd/analyze_test.go
+  s_66212c309e21f0::t_2ad3f87afde9b0 1-405
+internal/cmd/cli_test.go
+  s_66212c309e21f0::t_d349ce58520c37 1-507
+internal/cmd/fixture_test.go
+  s_66212c309e21f0::t_fe324f771c8044 1-94
+internal/cmd/gate_test.go
+  s_66212c309e21f0::t_53bbf1efcf2adf 1-412
+internal/cmd/main_test.go
+  s_66212c309e21f0::t_b00c163a9f8019 1-16
+internal/coverage/coverage_test.go
+  s_66212c309e21f0::t_08e47667123275 4-5,9,343-1063
+internal/detector/detector_detect_test.go
+  s_66212c309e21f0::t_3a073b1a985fa5 1-345
+internal/detector/detector_files_test.go
+  s_66212c309e21f0::t_d18237c511285f 1-285
+internal/detector/detector_git_test.go
+  s_66212c309e21f0::t_5fc3f5a09773c4 1-452
+internal/detector/detector_scoring_test.go
+  s_66212c309e21f0::t_57f2d6d4741db8 1-327
+internal/detector/detector_test.go
+  s_66212c309e21f0::t_ad117bee02b052 602-619
+internal/detector/main_test.go
+  s_66212c309e21f0::t_5599e3870a4b00 1-16
+internal/e2e/pipeline_test.go
+  s_66212c309e21f0::t_7c4537a0ef9dc8 40-42,54
+internal/evidence/evidence_test.go
+  s_66212c309e21f0::t_e09f4fca18040a 7-8,122-147,224-821
+internal/gitai/gitai_parse_test.go
+  s_66212c309e21f0::t_90d6f3e60b9f0d 1-237
+internal/gitai/gitai_range_test.go
+  s_66212c309e21f0::t_7ef29e925f72cb 1-343
+internal/gitai/main_test.go
+  s_66212c309e21f0::t_aab92a47136a50 1-16
+internal/mutation/mutation_test.go
+  s_66212c309e21f0::t_bc77998eeb7b91 4,7-8,136-374
+internal/policy/opa_test.go
+  s_66212c309e21f0::t_6a91c13149c08e 4-5,7-9,12-13,643-975
+internal/report/collect_test.go
+  s_66212c309e21f0::t_e5670260af3d15 1-530
+internal/report/html_test.go
+  s_66212c309e21f0::t_40393c004fe636 1-438
+internal/report/main_test.go
+  s_66212c309e21f0::t_c4b0426794a540 1-16
+internal/report/org_test.go
+  s_66212c309e21f0::t_7d77e3cf9db413 4-5,7-8,197-451
+internal/report/report_test.go
+  s_66212c309e21f0::t_963d7aac83ffb6 213-349
+internal/scorer/main_test.go
+  s_66212c309e21f0::t_f9bddc228cf439 1-16
+internal/scorer/scorer_test.go
+  s_66212c309e21f0::t_6d026bcb63873d 476-891
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "67f189169c29167a1ec909ec47d2f6ddbd1a8823",
+  "prompts": {},
+  "sessions": {
+    "s_66212c309e21f0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8763d161-5362-48a1-ae9b-11f7bcd83469",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "shenxianpeng <xianpeng.shen@gmail.com>"
+    }
+  }
+}
