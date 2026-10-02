@@ -473,3 +473,419 @@ func TestScore_CoverageIsNeverEstimated(t *testing.T) {
 		t.Errorf("delta = %f, want 0 with nothing measured", res.TechnicalDebtDelta)
 	}
 }
+
+// ── Fixture helpers ────────────────────────────────────────────
+
+// writeFixture writes a file into a fixture repository.
+func writeFixture(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		t.Fatalf("writing %s: %v", name, err)
+	}
+}
+
+// initFixtureRepo creates a git repository holding one committed README, makes
+// it the working directory for the rest of the test and returns its path. The
+// duplication estimate runs git in the working directory, so tests that reach
+// it use this to stay independent of the checkout the suite runs in.
+func initFixtureRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	gitIn(t, dir, "init", "-q", "-b", "main")
+	writeFixture(t, dir, "README.md", "# fixture\n")
+	gitIn(t, dir, "add", ".")
+	gitIn(t, dir, "commit", "-q", "-m", "chore: init")
+	t.Chdir(dir)
+	return dir
+}
+
+// duplicatedCode is a Go file whose body repeats one meaningful line n times,
+// so the duplication estimate for it is (n-1)/n: 0.75 for n = 4.
+func duplicatedCode(n int) string {
+	return "package p\n\n" + strings.Repeat("\tcallSomething(withArgument)\n", n)
+}
+
+// ── estimateDuplication ────────────────────────────────────────
+
+// TestEstimateDuplication_FailsOpen guards the estimate's failure mode: it is
+// advisory, so whenever git cannot list or produce the diff (unknown base,
+// not a repository, a diff that cannot be rendered) it reports no duplication
+// instead of failing the score.
+func TestEstimateDuplication_FailsOpen(t *testing.T) {
+	dir := initFixtureRepo(t)
+	writeFixture(t, dir, "dup.go", duplicatedCode(4))
+	gitIn(t, dir, "add", ".")
+
+	t.Run("unknown base ref", func(t *testing.T) {
+		if rate := estimateDuplication("no-such-ref"); rate != 0 {
+			t.Errorf("duplication = %f, want 0 for an unknown base", rate)
+		}
+	})
+
+	t.Run("outside a repository", func(t *testing.T) {
+		outside, err := filepath.EvalSymlinks(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Chdir(outside)
+		// Stop git from discovering a repository above the temp dir.
+		t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(outside))
+		if rate := estimateDuplication("HEAD"); rate != 0 {
+			t.Errorf("duplication = %f, want 0 outside a repository", rate)
+		}
+	})
+
+	// Last, because it changes the fixture's configuration.
+	t.Run("diff cannot be rendered", func(t *testing.T) {
+		if rate := estimateDuplication("HEAD"); rate <= 0 {
+			t.Fatalf("control: duplication = %f before the diff driver is broken, want > 0", rate)
+		}
+
+		// A diff driver that cannot run makes `git diff` fail while
+		// `git diff --name-only` (which never invokes it) still lists the file.
+		gitIn(t, dir, "config", "diff.broken.command", "ods-no-such-diff-tool")
+		writeFixture(t, dir, ".gitattributes", "*.go diff=broken\n")
+		gitIn(t, dir, "add", ".")
+		if rate := estimateDuplication("HEAD"); rate != 0 {
+			t.Errorf("duplication = %f, want 0 when the diff itself fails", rate)
+		}
+	})
+}
+
+// TestEstimateDuplication_BaseSelection guards which base the diff is taken
+// against: an explicit argument beats ODS_DIFF_BASE, which beats the HEAD~1
+// default. The fixture's only change is committed, so it is visible against
+// HEAD~1 and invisible against HEAD.
+func TestEstimateDuplication_BaseSelection(t *testing.T) {
+	dir := initFixtureRepo(t)
+	writeFixture(t, dir, "dup.go", duplicatedCode(4))
+	gitIn(t, dir, "add", ".")
+	gitIn(t, dir, "commit", "-q", "-m", "feat: add duplicated code")
+
+	cases := []struct {
+		name     string
+		env, arg string
+		want     float64
+	}{
+		{"nothing set defaults to HEAD~1", "", "", 0.75},
+		{"the environment variable beats the default", "HEAD", "", 0},
+		{"an explicit base beats the default", "", "HEAD", 0},
+		{"an explicit base beats the environment variable", "HEAD", "HEAD~1", 0.75},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("ODS_DIFF_BASE", c.env)
+			if rate := estimateDuplication(c.arg); rate != c.want {
+				t.Errorf("duplication = %f, want %f", rate, c.want)
+			}
+		})
+	}
+}
+
+// TestEstimateDuplication_RemovalsAreNotDuplication guards that only added
+// lines are measured: shrinking a file that repeated itself leaves nothing
+// added, so the estimate is 0.
+func TestEstimateDuplication_RemovalsAreNotDuplication(t *testing.T) {
+	dir := initFixtureRepo(t)
+	writeFixture(t, dir, "dup.go", duplicatedCode(4))
+	gitIn(t, dir, "add", ".")
+	gitIn(t, dir, "commit", "-q", "-m", "feat: add duplicated code")
+
+	writeFixture(t, dir, "dup.go", duplicatedCode(1))
+	gitIn(t, dir, "add", ".")
+	if rate := estimateDuplication("HEAD"); rate != 0 {
+		t.Errorf("duplication = %f, want 0 when the change only removes repeated lines", rate)
+	}
+}
+
+// TestEstimateDuplication_FileHeadersAreNotCode guards the diff parsing across
+// several files: the "+++ b/<path>" header of each added file and the
+// "+++ /dev/null" header of a deleted one are not code, so with long paths they
+// would otherwise inflate the denominator. Two new files that each add the same
+// two lines are exactly 3 duplicates out of 4.
+func TestEstimateDuplication_FileHeadersAreNotCode(t *testing.T) {
+	dir := initFixtureRepo(t)
+	writeFixture(t, dir, "retired_module_file.go", "package p\n\nfunc retired() { doSomethingUseful() }\n")
+	gitIn(t, dir, "add", ".")
+	gitIn(t, dir, "commit", "-q", "-m", "feat: add a file to retire")
+
+	body := duplicatedCode(2)
+	writeFixture(t, dir, "internal_alpha_module.go", body)
+	writeFixture(t, dir, "internal_beta_module.go", body)
+	gitIn(t, dir, "rm", "-q", "retired_module_file.go")
+	gitIn(t, dir, "add", ".")
+
+	if rate := estimateDuplication("HEAD"); rate != 0.75 {
+		t.Errorf("duplication = %f, want 0.75 (3 duplicates of 4 added code lines)", rate)
+	}
+}
+
+// ── Score ──────────────────────────────────────────────────────
+
+// TestScore_DuplicationFlowsIntoDelta guards the wiring from the diff to the
+// score: the estimate for Options.DiffBase lands in the breakdown, adds to the
+// delta one for one, and is amplified by the AI ratio like any other quality
+// debt.
+func TestScore_DuplicationFlowsIntoDelta(t *testing.T) {
+	dir := initFixtureRepo(t)
+	writeFixture(t, dir, "dup.go", duplicatedCode(4))
+	gitIn(t, dir, "add", ".")
+
+	mk := func(aiLines int) *ScoreResult {
+		return Score(Options{
+			DetectorResult: &detector.DetectionResult{Files: []detector.FileDetection{
+				{Path: "dup.go", AILines: aiLines, TotalLines: 100, Confidence: 1},
+			}},
+			AnalyzerResult:    &analyzer.AnalysisResult{TotalLines: 100},
+			CoverageResult:    &CoverageInput{Coverage: 1.0, Source: "go"}, // no coverage-gap term
+			TotalChangedLines: 100,
+			DiffBase:          "HEAD",
+		})
+	}
+
+	human := mk(0)
+	if human.Breakdown.DuplicationRate != 0.75 || human.TechnicalDebtDelta != 0.75 {
+		t.Errorf("duplication/delta = %f/%f, want 0.75/0.75", human.Breakdown.DuplicationRate, human.TechnicalDebtDelta)
+	}
+	if human.Verdict != "increase" || human.Risk != "low" {
+		t.Errorf("verdict/risk = %s/%s, want increase/low", human.Verdict, human.Risk)
+	}
+
+	ai := mk(100)
+	if ai.TechnicalDebtDelta != 0.75*1.5 {
+		t.Errorf("fully AI delta = %f, want %f (amplified by 1.5)", ai.TechnicalDebtDelta, 0.75*1.5)
+	}
+	if ai.Risk != "moderate" {
+		t.Errorf("fully AI risk = %s, want moderate", ai.Risk)
+	}
+}
+
+// TestScore_NoChangedLinesSkipsRatioAndDuplication guards the zero-size change:
+// with no changed lines there is no denominator for the AI ratio and nothing to
+// estimate duplication on, even when the repository holds duplicated additions.
+func TestScore_NoChangedLinesSkipsRatioAndDuplication(t *testing.T) {
+	dir := initFixtureRepo(t)
+	writeFixture(t, dir, "dup.go", duplicatedCode(4))
+	gitIn(t, dir, "add", ".")
+	gitIn(t, dir, "commit", "-q", "-m", "feat: add duplicated code")
+
+	opts := Options{
+		DetectorResult: &detector.DetectionResult{
+			Sources: []string{"commit-trailer"},
+			Files:   []detector.FileDetection{{Path: "dup.go", AILines: 50, TotalLines: 100, Confidence: 1}},
+		},
+		DiffBase: "HEAD~1",
+	}
+
+	opts.TotalChangedLines = 100
+	if control := Score(opts); control.Breakdown.DuplicationRate != 0.75 || control.Breakdown.AICodeRatio != 0.5 {
+		t.Fatalf("control: duplication/ratio = %f/%f, want 0.75/0.5", control.Breakdown.DuplicationRate, control.Breakdown.AICodeRatio)
+	}
+
+	opts.TotalChangedLines = 0
+	b := Score(opts).Breakdown
+	if b.DuplicationRate != 0 || b.AICodeRatio != 0 || b.AICodeRatioSource != "unknown" {
+		t.Errorf("breakdown = %+v, want no duplication, no ratio and source unknown", b)
+	}
+}
+
+// TestScore_CoverageSource guards the coverage provenance: a named source is
+// kept, a coverage result without one is attributed to "unknown", and an absent
+// result is not measured (-1) with source "unknown".
+func TestScore_CoverageSource(t *testing.T) {
+	cases := []struct {
+		name       string
+		cov        *CoverageInput
+		wantCov    float64
+		wantSource string
+	}{
+		{"named source is kept", &CoverageInput{Coverage: 0.8, Source: "lcov"}, 0.8, "lcov"},
+		{"missing source becomes unknown", &CoverageInput{Coverage: 0.8}, 0.8, "unknown"},
+		{"unmeasured coverage keeps the sentinel", &CoverageInput{Coverage: -1}, -1, "unknown"},
+		{"no coverage result", nil, -1, "unknown"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			res := Score(Options{CoverageResult: c.cov})
+			if res.Breakdown.TestCoverage != c.wantCov || res.Breakdown.TestCoverageSource != c.wantSource {
+				t.Errorf("coverage = %f (%s), want %f (%s)",
+					res.Breakdown.TestCoverage, res.Breakdown.TestCoverageSource, c.wantCov, c.wantSource)
+			}
+		})
+	}
+}
+
+// TestScore_VerdictFollowsRoundedDelta guards the verdict at the edges of the
+// one-decimal rounding: a delta that rounds to 0.0 is "neutral" on either side
+// of zero, one that rounds above zero is an "increase", and one that rounds
+// below zero is a "decrease". A negative delta needs a coverage figure above 1
+// (a surplus against the full-coverage baseline), which no real report should
+// produce, so that is the only way to reach the label.
+func TestScore_VerdictFollowsRoundedDelta(t *testing.T) {
+	cases := []struct {
+		name        string
+		coverage    float64
+		wantVerdict string
+	}{
+		{"fully covered", 1.0, "neutral"},
+		{"gap of 0.04 rounds to 0.0", 0.96, "neutral"},
+		{"gap of 0.06 rounds to 0.1", 0.94, "increase"},
+		{"surplus of 0.04 rounds to 0.0", 1.04, "neutral"},
+		{"surplus of 0.06 rounds to -0.1", 1.06, "decrease"},
+		{"coverage above 100 percent", 1.2, "decrease"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// No changed lines, so no duplication estimate: coverage is the only term.
+			res := Score(Options{CoverageResult: &CoverageInput{Coverage: c.coverage, Source: "go"}})
+			if res.Verdict != c.wantVerdict {
+				t.Errorf("verdict = %s, want %s (delta %f)", res.Verdict, c.wantVerdict, res.TechnicalDebtDelta)
+			}
+			if res.Risk != "low" {
+				t.Errorf("risk = %s, want low: a delta of at most 1.0 is acceptable whichever way it points", res.Risk)
+			}
+		})
+	}
+}
+
+// TestScore_RiskBandBoundaries guards where each risk band ends: a delta of
+// exactly 1.0, 3.0 or 5.0 still belongs to the lower band, and anything above
+// moves up. Deltas are built from whole findings (1.5 each) and the coverage gap.
+func TestScore_RiskBandBoundaries(t *testing.T) {
+	cases := []struct {
+		name         string
+		highFindings int
+		coverage     float64
+		wantDelta    float64
+		wantRisk     string
+		wantAdvice   string
+	}{
+		{"exactly 1.0 is low", 0, 0.0, 1.0, "low", "Acceptable"},
+		{"one finding is moderate", 1, 1.0, 1.5, "moderate", "Review recommended"},
+		{"exactly 3.0 is still moderate", 2, 1.0, 3.0, "moderate", "Review recommended"},
+		{"above 3.0 is high", 3, 1.0, 4.5, "high", "Add tests"},
+		{"exactly 5.0 is still high", 3, 0.5, 5.0, "high", "Add tests"},
+		{"above 5.0 is critical", 3, 0.0, 5.5, "critical", "Fix high/critical"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var issues []analyzer.Issue
+			for i := 0; i < c.highFindings; i++ {
+				issues = append(issues, analyzer.Issue{Rule: "t", Severity: "high", Line: i + 1})
+			}
+			// No changed lines, so no duplication estimate: findings and coverage only.
+			res := Score(Options{
+				AnalyzerResult: &analyzer.AnalysisResult{Issues: issues},
+				CoverageResult: &CoverageInput{Coverage: c.coverage, Source: "go"},
+			})
+			if res.TechnicalDebtDelta != c.wantDelta {
+				t.Fatalf("delta = %f, want %f", res.TechnicalDebtDelta, c.wantDelta)
+			}
+			if res.Risk != c.wantRisk {
+				t.Errorf("risk = %s, want %s", res.Risk, c.wantRisk)
+			}
+			if !strings.Contains(res.Recommendation, c.wantAdvice) {
+				t.Errorf("recommendation = %q, want it to contain %q", res.Recommendation, c.wantAdvice)
+			}
+		})
+	}
+}
+
+// TestScore_FindingsWithoutLinesStillCount guards findings ingested from SARIF
+// that carry no local lines: with a zero line count density is not computed,
+// but every critical/high finding is still counted and charged at 1.5 each. A
+// delta of exactly 3.0 is still in the "moderate" band.
+func TestScore_FindingsWithoutLinesStillCount(t *testing.T) {
+	res := Score(Options{
+		AnalyzerResult: &analyzer.AnalysisResult{
+			TotalLines: 0,
+			Issues: []analyzer.Issue{
+				{Rule: "sarif/a", Severity: "high"},
+				{Rule: "sarif/b", Severity: "critical"},
+				{Rule: "sarif/c", Severity: "low"},
+			},
+		},
+		CoverageResult: &CoverageInput{Coverage: 1.0, Source: "sarif"},
+	})
+	b := res.Breakdown
+	if b.CriticalIssues != 2 {
+		t.Errorf("critical issues = %d, want 2 (the low finding is not counted)", b.CriticalIssues)
+	}
+	if b.DefectDensity != 0 {
+		t.Errorf("defect density = %f, want 0 with no lines", b.DefectDensity)
+	}
+	if res.TechnicalDebtDelta != 3.0 || res.Risk != "moderate" {
+		t.Errorf("delta/risk = %f/%s, want 3.0/moderate", res.TechnicalDebtDelta, res.Risk)
+	}
+}
+
+// TestScore_FilesAnalyzed guards the file count: the detector's file list when
+// there is one, otherwise 1 when the analyzer ran (something was analyzed),
+// otherwise 0.
+func TestScore_FilesAnalyzed(t *testing.T) {
+	two := &detector.DetectionResult{Files: []detector.FileDetection{{Path: "a.go"}, {Path: "b.go"}}}
+	none := &detector.DetectionResult{}
+	ran := &analyzer.AnalysisResult{}
+
+	cases := []struct {
+		name string
+		opts Options
+		want int
+	}{
+		{"detector files win", Options{DetectorResult: two, AnalyzerResult: ran}, 2},
+		{"detector without files, analyzer ran", Options{DetectorResult: none, AnalyzerResult: ran}, 1},
+		{"analyzer only", Options{AnalyzerResult: ran}, 1},
+		{"detector without files, no analyzer", Options{DetectorResult: none}, 0},
+		{"nothing ran", Options{}, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := Score(c.opts).FilesAnalyzed; got != c.want {
+				t.Errorf("FilesAnalyzed = %d, want %d", got, c.want)
+			}
+		})
+	}
+}
+
+// ── FormatScore ────────────────────────────────────────────────
+
+// TestFormatScore_Output guards the one-line summary: the delta is signed, rates
+// are shown as whole percentages, and coverage reads N/A only when it was not
+// measured (a measured 0% is still 0%).
+func TestFormatScore_Output(t *testing.T) {
+	cases := []struct {
+		name string
+		r    ScoreResult
+		want string
+	}{
+		{
+			"everything measured",
+			ScoreResult{TechnicalDebtDelta: 2.5, Risk: "moderate", Breakdown: ScoreBreakdown{
+				AICodeRatio: 0.4, DefectDensity: 12.5, CriticalIssues: 3, TestCoverage: 0.3, DuplicationRate: 0.25,
+			}},
+			"Tech Debt Delta: +2.5 | Risk: moderate | AI Ratio: 40% | Defects: 12.5/KLOC | Critical: 3 | Coverage: 30% | Duplication: 25%",
+		},
+		{
+			"coverage not measured",
+			ScoreResult{Risk: "low", Breakdown: ScoreBreakdown{TestCoverage: -1}},
+			"Tech Debt Delta: +0.0 | Risk: low | AI Ratio: 0% | Defects: 0.0/KLOC | Critical: 0 | Coverage: N/A | Duplication: 0%",
+		},
+		{
+			"zero coverage is measured",
+			ScoreResult{Risk: "low", Breakdown: ScoreBreakdown{TestCoverage: 0}},
+			"Tech Debt Delta: +0.0 | Risk: low | AI Ratio: 0% | Defects: 0.0/KLOC | Critical: 0 | Coverage: 0% | Duplication: 0%",
+		},
+		{
+			"negative delta keeps its sign",
+			ScoreResult{TechnicalDebtDelta: -0.5, Risk: "low", Breakdown: ScoreBreakdown{TestCoverage: 1}},
+			"Tech Debt Delta: -0.5 | Risk: low | AI Ratio: 0% | Defects: 0.0/KLOC | Critical: 0 | Coverage: 100% | Duplication: 0%",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.r.FormatScore(); got != c.want {
+				t.Errorf("FormatScore =\n  %q\nwant\n  %q", got, c.want)
+			}
+		})
+	}
+}
