@@ -60,6 +60,10 @@ ai_disclosed {
 }
 
 ai_disclosed {
+    input.detection_sources[_] == "agent-trace"
+}
+
+ai_disclosed {
     input.detection_sources[_] == "pr-body"
 }
 
@@ -95,6 +99,9 @@ review_tier := "auto" {
     not ai_touches_risky_path
     not ai_low_patch_coverage
     not ai_weak_mutation_score
+    not unverified_claim
+    not tests_weakened
+    not ai_adds_suppressions
 }
 
 review_tier := "elevated" {
@@ -193,6 +200,74 @@ warn[msg] {
 
 review_tier := "elevated" {
     ai_weak_mutation_score
+}
+
+# ── Claims: does the description match the diff? ──────────────────────────
+# The PR description's checkable statements (tests added, docs updated, fixes
+# an issue), each checked against the files the change adds or modifies. A
+# claim the diff does not bear out warns on any change and routes AI-authored
+# changes to elevated review; editing the description or the change clears it.
+claim_labels := {
+    "tests-added": "tests were added",
+    "docs-updated": "documentation was updated",
+    "fixes-issue": "it fixes an issue",
+}
+
+unverified_claim {
+    input.merge_confidence.claims[_].verified == false
+}
+
+warn[msg] {
+    c := input.merge_confidence.claims[_]
+    c.verified == false
+    msg = sprintf("The PR description says %s, but the diff does not show it (%s)", [object.get(claim_labels, c.claim, c.claim), c.evidence])
+}
+
+review_tier := "elevated" {
+    input.ai_generated == true
+    unverified_claim
+}
+
+# ── Test weakening: did the tests get easier to pass? ─────────────────────
+# A deleted test file, an added skip, more assertions removed than added.
+# Each has legitimate uses (a removed feature, a quarantined flaky test), so
+# they warn on any change and route AI-authored changes to elevated review.
+tests_weakened {
+    input.merge_confidence.tests_weakened
+}
+
+warn[msg] {
+    f := input.merge_confidence.test_weakening.deleted_test_files[_]
+    msg = sprintf("Test file deleted (%s) — confirm what it covered is gone or tested elsewhere", [f])
+}
+
+warn[msg] {
+    n := input.merge_confidence.test_weakening.skips_added
+    n > 0
+    msg = sprintf("%d test skip marker(s) added — confirm no failing test is being hidden", [n])
+}
+
+warn[msg] {
+    w := input.merge_confidence.test_weakening
+    w.assertions_removed > w.assertions_added
+    msg = sprintf("Tests lose assertions (%d removed, %d added) — confirm no check was loosened to pass", [w.assertions_removed, w.assertions_added])
+}
+
+review_tier := "elevated" {
+    input.ai_generated == true
+    tests_weakened
+}
+
+# Lint and type-check suppressions silence a check without changing what it
+# checks. On AI-authored changes they warn and keep the change out of "auto".
+ai_adds_suppressions {
+    input.ai_generated == true
+    input.merge_confidence.suppressions_added > 0
+}
+
+warn[msg] {
+    ai_adds_suppressions
+    msg = sprintf("AI-authored change adds %d lint or type-check suppression(s)", [input.merge_confidence.suppressions_added])
 }
 
 has_high_or_critical {

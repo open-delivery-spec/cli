@@ -45,9 +45,10 @@ type EvalInput struct {
 	AIGenerated  bool    `json:"ai_generated"`
 	AIConfidence float64 `json:"ai_confidence"`
 	// DetectionSources lists which detection signals fired (commit-trailer,
-	// git-ai-notes, pr-body, branch-name, diff-heuristics). It lets policies
-	// separate *disclosed* AI use (author attribution: commit-trailer,
-	// git-ai-notes, pr-body) from merely *suspected* AI use, so the SFC/kernel
+	// git-ai-notes, agent-trace, pr-body, branch-name, diff-heuristics). It
+	// lets policies separate *disclosed* AI use (author attribution:
+	// commit-trailer, git-ai-notes, agent-trace, pr-body) from merely
+	// *suspected* AI use, so the SFC/kernel
 	// disclosure norms become checkable at the gate.
 	DetectionSources   []string       `json:"detection_sources,omitempty"`
 	AIFiles            []EvalFileInfo `json:"ai_files"`
@@ -71,7 +72,7 @@ type EvalInput struct {
 	ChangedFiles  []string `json:"changed_files"`
 	Branch        string   `json:"branch"`
 	// EvidenceTier is the strongest class of AI-attribution evidence present,
-	// derived from DetectionSources: "corroborated" (git-ai-notes) > "attested"
+	// derived from DetectionSources: "corroborated" (git-ai-notes, agent-trace) > "attested"
 	// (commit-trailer, pr-body) > "inferred" (branch-name, diff-heuristics).
 	// Empty when no attribution source fired. A confidence label for how the
 	// attribution was obtained — not forensic proof of authorship.
@@ -99,6 +100,36 @@ type EvalMergeConfidence struct {
 	TestsTouched            bool     `json:"tests_touched"`
 	AddedSourceWithoutTests bool     `json:"added_source_without_tests"`
 	RiskyPaths              []string `json:"risky_paths,omitempty"`
+	// Claims are the checkable statements in the PR description (tests
+	// added, docs updated, fixes an issue) and whether the diff bears each
+	// out. Empty when there is no description or it claims nothing checkable.
+	Claims []EvalClaim `json:"claims,omitempty"`
+	// TestsWeakened is true when the change deletes a test file, adds a test
+	// skip, or removes more assertions than it adds; TestWeakening has the
+	// counts. Advisory: each pattern has legitimate uses.
+	TestsWeakened bool               `json:"tests_weakened"`
+	TestWeakening *EvalTestWeakening `json:"test_weakening,omitempty"`
+	// SuppressionsAdded counts added lines that silence a linter or type
+	// checker (nolint, type: ignore, @ts-ignore, eslint-disable, …).
+	SuppressionsAdded int `json:"suppressions_added"`
+}
+
+// EvalClaim is one PR-description claim checked against the diff
+// (package internal/mergeconf, CheckClaims).
+type EvalClaim struct {
+	Claim    string `json:"claim"` // tests-added | docs-updated | fixes-issue
+	Text     string `json:"text"`
+	Verified bool   `json:"verified"`
+	Evidence string `json:"evidence"`
+}
+
+// EvalTestWeakening mirrors mergeconf.TestWeakening under
+// input.merge_confidence.test_weakening.
+type EvalTestWeakening struct {
+	DeletedTestFiles  []string `json:"deleted_test_files,omitempty"`
+	SkipsAdded        int      `json:"skips_added"`
+	AssertionsRemoved int      `json:"assertions_removed"`
+	AssertionsAdded   int      `json:"assertions_added"`
 }
 
 // EvalAIReview is one AI reviewer's verdict in the policy input.

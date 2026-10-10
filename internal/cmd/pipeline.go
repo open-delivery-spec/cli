@@ -16,6 +16,7 @@ import (
 type pipelineRun struct {
 	Base       string
 	Branch     string
+	PRBody     string
 	Detect     *detector.DetectionResult
 	Analysis   *analyzer.AnalysisResult
 	DiffFiles  map[string][]string // added lines per changed code file
@@ -41,6 +42,7 @@ func runPipeline(cmd *cobra.Command, diffBase, sarifPath, coverageFile string) p
 		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: %v\n", err)
 	} else {
 		detectOpts.PRBody = body
+		p.PRBody = body
 	}
 	detectResult, err := detector.Detect(detectOpts)
 	if err != nil {

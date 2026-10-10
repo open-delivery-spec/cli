@@ -27,7 +27,7 @@ type ScoreResult struct {
 // ScoreBreakdown provides the dimensional scores.
 type ScoreBreakdown struct {
 	AICodeRatio        float64 `json:"ai_code_ratio"`        // AI lines / total changed code lines
-	AICodeRatioSource  string  `json:"ai_code_ratio_source"` // git-ai/commit-trailer/diff-heuristics/unknown
+	AICodeRatioSource  string  `json:"ai_code_ratio_source"` // git-ai/agent-trace/commit-trailer/diff-heuristics/unknown
 	DefectDensity      float64 `json:"defect_density"`       // high/critical issues per KLOC (informational — not part of the delta)
 	CriticalIssues     int     `json:"critical_issues"`      // critical + high severity
 	TestCoverage       float64 `json:"test_coverage"`        // fraction in [0,1] or -1 if not measured
@@ -195,6 +195,8 @@ func ratioSource(sources []string) string {
 	switch {
 	case has["git-ai-notes"]:
 		return "git-ai"
+	case has["agent-trace"]:
+		return "agent-trace"
 	case has["commit-trailer"]:
 		return "commit-trailer"
 	case has["diff-heuristics"]:

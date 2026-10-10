@@ -199,6 +199,8 @@ func TestScore_RatioSourceFollowsDetector(t *testing.T) {
 	}{
 		{[]string{"commit-trailer", "branch-name"}, "commit-trailer"},
 		{[]string{"git-ai-notes", "commit-trailer"}, "git-ai"},
+		{[]string{"commit-trailer", "agent-trace"}, "agent-trace"},
+		{[]string{"git-ai-notes", "agent-trace"}, "git-ai"},
 		{[]string{"branch-name", "diff-heuristics"}, "diff-heuristics"},
 		{[]string{"pr-body"}, "unknown"},
 	}

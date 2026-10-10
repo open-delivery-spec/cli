@@ -45,6 +45,20 @@ func assembleGateInputs(cmd *cobra.Command, diffBase, sarifPath string, aiReview
 	logx.Debugf("check: merge-confidence tests_touched=%t added_source_without_tests=%t risky_paths=%d files=%d",
 		mc.TestsTouched, mc.AddedSourceWithoutTests, len(mc.RiskyPaths), mc.FilesChanged)
 
+	// Facts that need both sides of the diff: tests deleted, skipped or
+	// stripped of assertions, and checks silenced with a suppression comment.
+	fileChanges, _ := getDiffFileChanges(diffBase)
+	weakening := mergeconf.ComputeTestWeakening(fileChanges)
+	suppressions := mergeconf.CountSuppressionsAdded(fileChanges)
+
+	// What the PR description says the change does, checked against the
+	// files it adds or modifies. Deleting a test file does not add a test.
+	deleted, _ := getDeletedFiles(diffBase)
+	claims := mergeconf.CheckClaims(p.PRBody, withoutPaths(changedFiles, deleted))
+	logx.Debugf("check: tests_weakened=%t (deleted=%d skips=%d assertions -%d/+%d) suppressions=%d claims=%d",
+		weakening.Weakened(), len(weakening.DeletedTestFiles), weakening.SkipsAdded,
+		weakening.AssertionsRemoved, weakening.AssertionsAdded, suppressions, len(claims))
+
 	// Patch (diff) coverage: of the added lines, how many are covered by tests?
 	// Requires a per-line coverage report; −1 ("not measured") otherwise.
 	patchCoverage := coverage.NotMeasured
@@ -95,6 +109,10 @@ func assembleGateInputs(cmd *cobra.Command, diffBase, sarifPath string, aiReview
 			TestsTouched:            mc.TestsTouched,
 			AddedSourceWithoutTests: mc.AddedSourceWithoutTests,
 			RiskyPaths:              mc.RiskyPaths,
+			Claims:                  evalClaims(claims),
+			TestsWeakened:           weakening.Weakened(),
+			TestWeakening:           evalTestWeakening(weakening),
+			SuppressionsAdded:       suppressions,
 		},
 		// _ods_detect_error is not set here — it's added by validate-action when
 		// the detect stage fails, not by the CLI's check command.
@@ -158,4 +176,42 @@ func assembleGateInputs(cmd *cobra.Command, diffBase, sarifPath string, aiReview
 	}
 
 	return evalInput, detectResult, nil
+}
+
+// evalClaims mirrors the checked PR-description claims into the policy input.
+func evalClaims(claims []mergeconf.Claim) []policy.EvalClaim {
+	var out []policy.EvalClaim
+	for _, c := range claims {
+		out = append(out, policy.EvalClaim{Claim: c.Claim, Text: c.Text, Verified: c.Verified, Evidence: c.Evidence})
+	}
+	return out
+}
+
+// evalTestWeakening mirrors the test-weakening counts into the policy input.
+// Always present, so a policy can read zero counts without a guard.
+func evalTestWeakening(w mergeconf.TestWeakening) *policy.EvalTestWeakening {
+	return &policy.EvalTestWeakening{
+		DeletedTestFiles:  w.DeletedTestFiles,
+		SkipsAdded:        w.SkipsAdded,
+		AssertionsRemoved: w.AssertionsRemoved,
+		AssertionsAdded:   w.AssertionsAdded,
+	}
+}
+
+// withoutPaths returns files minus the paths in drop, keeping order.
+func withoutPaths(files, drop []string) []string {
+	if len(drop) == 0 {
+		return files
+	}
+	skip := make(map[string]bool, len(drop))
+	for _, d := range drop {
+		skip[d] = true
+	}
+	var out []string
+	for _, f := range files {
+		if !skip[f] {
+			out = append(out, f)
+		}
+	}
+	return out
 }

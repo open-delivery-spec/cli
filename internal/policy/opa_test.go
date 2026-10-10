@@ -973,3 +973,118 @@ func TestDiscoverRegoFile_Candidates(t *testing.T) {
 		}
 	})
 }
+
+func TestDefaultPolicyClaimsAndTestWeakening(t *testing.T) {
+	path := writeTempPolicy(t, DefaultRegoPolicy())
+	trailer := []string{"commit-trailer"}
+	unverified := []EvalClaim{{Claim: "tests-added", Text: "- [x] Unit tests added", Verified: false, Evidence: "no test file was added or modified"}}
+	verified := []EvalClaim{{Claim: "tests-added", Text: "- [x] Unit tests added", Verified: true, Evidence: "1 test file changed: a_test.go"}}
+
+	cases := []struct {
+		name     string
+		in       *EvalInput
+		wantWarn string
+		wantTier string
+	}{
+		{
+			"AI change with an unverified claim warns and elevates",
+			&EvalInput{AIGenerated: true, DetectionSources: trailer, PatchCoverage: -1, MutationScore: -1,
+				MergeConfidence: &EvalMergeConfidence{TestsTouched: true, Claims: unverified}},
+			"says tests were added, but the diff does not show it", ReviewTierElevated,
+		},
+		{
+			"human change with an unverified claim warns and leaves auto",
+			&EvalInput{PatchCoverage: -1, MutationScore: -1,
+				MergeConfidence: &EvalMergeConfidence{Claims: unverified}},
+			"does not show it", ReviewTierStandard,
+		},
+		{
+			"a verified claim is neutral",
+			&EvalInput{AIGenerated: true, DetectionSources: trailer, PatchCoverage: -1, MutationScore: -1,
+				MergeConfidence: &EvalMergeConfidence{TestsTouched: true, Claims: verified}},
+			"", ReviewTierAuto,
+		},
+		{
+			"an unknown claim kind still renders",
+			&EvalInput{PatchCoverage: -1, MutationScore: -1,
+				MergeConfidence: &EvalMergeConfidence{Claims: []EvalClaim{{Claim: "benchmarks-run", Evidence: "no benchmark output"}}}},
+			"says benchmarks-run", ReviewTierStandard,
+		},
+		{
+			"AI change deleting a test file warns and elevates",
+			&EvalInput{AIGenerated: true, DetectionSources: trailer, PatchCoverage: -1, MutationScore: -1,
+				MergeConfidence: &EvalMergeConfidence{TestsWeakened: true,
+					TestWeakening: &EvalTestWeakening{DeletedTestFiles: []string{"pkg/a_test.go"}}}},
+			"Test file deleted (pkg/a_test.go)", ReviewTierElevated,
+		},
+		{
+			"AI change adding a skip warns and elevates",
+			&EvalInput{AIGenerated: true, DetectionSources: trailer, PatchCoverage: -1, MutationScore: -1,
+				MergeConfidence: &EvalMergeConfidence{TestsWeakened: true, TestWeakening: &EvalTestWeakening{SkipsAdded: 2}}},
+			"2 test skip marker(s) added", ReviewTierElevated,
+		},
+		{
+			"human change losing assertions warns and leaves auto",
+			&EvalInput{PatchCoverage: -1, MutationScore: -1,
+				MergeConfidence: &EvalMergeConfidence{TestsWeakened: true,
+					TestWeakening: &EvalTestWeakening{AssertionsRemoved: 3, AssertionsAdded: 1}}},
+			"3 removed, 1 added", ReviewTierStandard,
+		},
+		{
+			"balanced assertion changes are neutral",
+			&EvalInput{AIGenerated: true, DetectionSources: trailer, PatchCoverage: -1, MutationScore: -1,
+				MergeConfidence: &EvalMergeConfidence{TestsTouched: true,
+					TestWeakening: &EvalTestWeakening{AssertionsRemoved: 2, AssertionsAdded: 2}}},
+			"", ReviewTierAuto,
+		},
+		{
+			"AI suppressions warn and leave auto without elevating",
+			&EvalInput{AIGenerated: true, DetectionSources: trailer, PatchCoverage: -1, MutationScore: -1,
+				MergeConfidence: &EvalMergeConfidence{TestsTouched: true, SuppressionsAdded: 1}},
+			"adds 1 lint or type-check suppression(s)", ReviewTierStandard,
+		},
+		{
+			"human suppressions are neutral",
+			&EvalInput{PatchCoverage: -1, MutationScore: -1,
+				MergeConfidence: &EvalMergeConfidence{SuppressionsAdded: 4}},
+			"", ReviewTierAuto,
+		},
+		{
+			"Agent Trace counts as disclosure",
+			&EvalInput{AIGenerated: true, AIConfidence: 0.95, DetectionSources: []string{"agent-trace"}, PatchCoverage: -1, MutationScore: -1,
+				MergeConfidence: &EvalMergeConfidence{TestsTouched: true}},
+			"", ReviewTierAuto,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := Evaluate(path, tc.in)
+			if err != nil {
+				t.Fatalf("evaluate: %v", err)
+			}
+			if !res.Allowed {
+				t.Errorf("claims and test weakening must never deny by default, got: %v", res.Denials)
+			}
+			if res.ReviewTier != tc.wantTier {
+				t.Errorf("review_tier = %q, want %q (warnings: %v)", res.ReviewTier, tc.wantTier, res.Warnings)
+			}
+			if tc.wantWarn == "" {
+				for _, w := range res.Warnings {
+					if strings.Contains(w, "PR description") || strings.Contains(w, "Test") || strings.Contains(w, "suppression") || strings.Contains(w, "disclosure") {
+						t.Errorf("unexpected warning %q", w)
+					}
+				}
+				return
+			}
+			found := false
+			for _, w := range res.Warnings {
+				if strings.Contains(w, tc.wantWarn) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("expected a warning containing %q, got %v", tc.wantWarn, res.Warnings)
+			}
+		})
+	}
+}
