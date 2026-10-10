@@ -33,10 +33,12 @@ confidence score — without requiring developer self-disclosure.
 
 Signal sources (in order of confidence):
   1. git-ai authorship notes (refs/notes/ai), when present
-  2. Commit trailers (Co-Authored-By: <ai-tool>, Assisted-by: AGENT:MODEL)
-  3. PR description AI disclosure section
-  4. Branch name prefix (claude/, copilot/, cursor/, codeium/, ai-)
-  5. Code diff heuristics (comment ratio, naming patterns, error handling),
+  2. Agent Trace records (.agent-trace/*.jsonl), when present
+  3. Commit trailers (Co-Authored-By: <ai-tool>, Assisted-by: AGENT:MODEL)
+  4. PR description AI disclosure (ticked checkbox, disclosure sentence,
+     or a tool footer such as "Generated with Claude Code")
+  5. Branch name prefix (claude/, copilot/, cursor/, codeium/, ai-)
+  6. Code diff heuristics (comment ratio, naming patterns, error handling),
      only when nothing attests the change
 
 Exit status is 0 whenever detection ran, whether or not AI was found; it is

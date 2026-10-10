@@ -167,7 +167,7 @@ const affirmationStatement = "This document records deterministic, artifact-leve
 func tierConfidence(tier string) (float64, string) {
 	switch tier {
 	case "corroborated":
-		return 1.0, "Evidence tier: corroborated (independently measured, e.g. git-ai line attribution)."
+		return 1.0, "Evidence tier: corroborated (independently measured, e.g. git-ai or Agent Trace line attribution)."
 	case "attested":
 		return 0.9, "Evidence tier: attested (declared by the author/tool; not independently measured)."
 	case "inferred":
@@ -183,7 +183,7 @@ func techniqueFor(source string) string {
 	switch source {
 	case "commit-trailer", "pr-body":
 		return "attestation"
-	case "git-ai-notes":
+	case "git-ai-notes", "agent-trace":
 		return "source-code-analysis"
 	case "branch-name":
 		return "filename"
@@ -421,7 +421,7 @@ func governanceStandard() Standard {
 		Description: "Deterministic, artifact-level requirements for governing AI-assisted changes: disclosure, evidence grading, diff-scoped test adequacy, policy evaluation, and pipeline integrity.",
 		Requirements: []Requirement{
 			{BOMRef: "req:ods-r1", Identifier: "ODS-R1", Title: "AI involvement is disclosed",
-				Text: "When AI assistance is detected, author or tool attribution is present (commit trailer, PR-body disclosure, or git-ai notes)."},
+				Text: "When AI assistance is detected, author or tool attribution is present (commit trailer, PR-body disclosure, git-ai notes, or Agent Trace records)."},
 			{BOMRef: "req:ods-r2", Identifier: "ODS-R2", Title: "Attribution strength is graded",
 				Text: "The change carries an evidence tier stating how attribution was obtained: corroborated (measured), attested (declared), inferred (heuristic), or inconclusive."},
 			{BOMRef: "req:ods-r3", Identifier: "ODS-R3", Title: "Changed code is exercised by tests",

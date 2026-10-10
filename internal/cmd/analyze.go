@@ -11,6 +11,7 @@ import (
 	"github.com/open-delivery-spec/cli/internal/analyzer"
 	"github.com/open-delivery-spec/cli/internal/detector"
 	"github.com/open-delivery-spec/cli/internal/logx"
+	"github.com/open-delivery-spec/cli/internal/mergeconf"
 	"github.com/open-delivery-spec/cli/internal/sarif"
 	"github.com/spf13/cobra"
 )
@@ -352,6 +353,82 @@ func getAllChangedFiles(base string) ([]string, error) {
 		}
 	}
 	return files, nil
+}
+
+// getDeletedFiles returns the paths the diff deletes.
+func getDeletedFiles(base string) ([]string, error) {
+	out, err := exec.Command("git", "diff", "--name-only", "--diff-filter=D", base).Output()
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, name := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if name = strings.TrimSpace(name); name != "" {
+			files = append(files, name)
+		}
+	}
+	return files, nil
+}
+
+// getDiffFileChanges returns every changed code file with both its added and
+// its removed lines, from one diff with rename detection on, so a moved test
+// file reads as a rename rather than a deleted test.
+func getDiffFileChanges(base string) ([]mergeconf.FileChange, error) {
+	out, err := exec.Command("git", "diff", "--no-color", "--no-ext-diff", "-M",
+		"--src-prefix=a/", "--dst-prefix=b/", base).Output()
+	if err != nil {
+		return nil, err
+	}
+	return parseFileChanges(out), nil
+}
+
+// parseFileChanges splits a multi-file unified diff into per-file changes,
+// keeping code files only. The path comes from the ---/+++ headers; a deleted
+// file has "+++ /dev/null" and keeps its old path, a created one has
+// "--- /dev/null".
+func parseFileChanges(diff []byte) []mergeconf.FileChange {
+	var changes []mergeconf.FileChange
+	var cur *mergeconf.FileChange
+	oldPath, inHunk := "", false
+	flush := func() {
+		if cur != nil && cur.Path != "" && isCodeFileExt(cur.Path) {
+			changes = append(changes, *cur)
+		}
+		cur = nil
+	}
+	for _, line := range strings.Split(string(diff), "\n") {
+		switch {
+		case strings.HasPrefix(line, "diff --git "):
+			flush()
+			cur, oldPath, inHunk = &mergeconf.FileChange{}, "", false
+		case cur == nil:
+		case !inHunk && strings.HasPrefix(line, "--- "):
+			oldPath = diffHeaderPath(line[4:], "a/")
+		case !inHunk && strings.HasPrefix(line, "+++ "):
+			if p := diffHeaderPath(line[4:], "b/"); p == "/dev/null" {
+				cur.Deleted, cur.Path = true, oldPath
+			} else {
+				cur.Path, cur.Created = p, oldPath == "/dev/null"
+			}
+		case strings.HasPrefix(line, "@@"):
+			inHunk = true
+		case !inHunk:
+		case strings.HasPrefix(line, "+"):
+			cur.Added = append(cur.Added, line[1:])
+		case strings.HasPrefix(line, "-"):
+			cur.Removed = append(cur.Removed, line[1:])
+		}
+	}
+	flush()
+	return changes
+}
+
+// diffHeaderPath strips the a/ or b/ prefix, the quoting git adds to unusual
+// names, and the tab git appends to names with spaces.
+func diffHeaderPath(p, prefix string) string {
+	p = strings.TrimRight(p, "\t")
+	p = strings.Trim(p, `"`)
+	return strings.TrimPrefix(p, prefix)
 }
 
 // getDiffAddedLineNumbers returns, per changed code file, the new-file line

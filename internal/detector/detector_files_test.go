@@ -151,19 +151,19 @@ func TestFilesFromGitAI(t *testing.T) {
 		// Repeated because the order of a map is random: an unsorted result
 		// would match the expected order by chance now and then.
 		for range 6 {
-			if got := filesFromGitAI(attr, base); !reflect.DeepEqual(got, want) {
-				t.Fatalf("filesFromGitAI = %+v, want %+v", got, want)
+			if got := filesFromMeasured(attr.Files, base); !reflect.DeepEqual(got, want) {
+				t.Fatalf("filesFromMeasured = %+v, want %+v", got, want)
 			}
 		}
 	})
 	t.Run("an unresolvable base leaves nothing to attribute", func(t *testing.T) {
-		if got := filesFromGitAI(attr, "no-such-ref"); len(got) != 0 {
-			t.Errorf("filesFromGitAI = %+v, want none without a range diff", got)
+		if got := filesFromMeasured(attr.Files, "no-such-ref"); len(got) != 0 {
+			t.Errorf("filesFromMeasured = %+v, want none without a range diff", got)
 		}
 	})
 	t.Run("no measured files yield no rows", func(t *testing.T) {
-		if got := filesFromGitAI(&gitai.RangeAttribution{}, base); len(got) != 0 {
-			t.Errorf("filesFromGitAI = %+v, want none", got)
+		if got := filesFromMeasured(nil, base); len(got) != 0 {
+			t.Errorf("filesFromMeasured = %+v, want none", got)
 		}
 	})
 }

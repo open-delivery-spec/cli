@@ -6,12 +6,14 @@
 # in CONTRIBUTING.md into a check that runs on every pull request:
 #
 #   1. Disclose it.  AI-assisted changes carry a Co-Authored-By / Assisted-by
-#                    trailer, git-ai notes, or an AI-disclosure section in the
-#                    PR body.
-#   2. Test it.      AI-authored source comes with tests, and the added lines
-#                    are covered when a coverage report exists.
+#                    trailer, git-ai notes, Agent Trace records, or an AI
+#                    disclosure in the PR body.
+#   2. Test it.      AI-authored source comes with tests, the added lines are
+#                    covered when a coverage report exists, and existing tests
+#                    are not deleted, skipped or loosened to make it pass.
 #   3. Own it.       A human reviews every AI-assisted change; changes to CI
-#                    config, dependencies, auth or crypto get extra eyes.
+#                    config, dependencies, auth or crypto get extra eyes, and
+#                    the description says what the diff does.
 #
 # Posture: nudge and route, never block on suspicion. The heuristics have
 # false positives and a first-time contributor must never be turned away by
@@ -48,6 +50,10 @@ ai_disclosed {
 
 ai_disclosed {
     input.detection_sources[_] == "git-ai-notes"
+}
+
+ai_disclosed {
+    input.detection_sources[_] == "agent-trace"
 }
 
 ai_disclosed {
@@ -114,6 +120,24 @@ review_tier := "elevated" {
     ai_low_patch_coverage
 }
 
+# A change can also make its own tests easier to pass: delete a test file,
+# skip a test, or remove more assertions than it adds. Each has legitimate
+# uses (a removed feature, a quarantined flaky test), so this asks for a look
+# instead of refusing.
+ai_weakens_tests {
+    input.ai_generated
+    input.merge_confidence.tests_weakened
+}
+
+warn[msg] {
+    ai_weakens_tests
+    msg = "AI-assisted change deletes, skips or loosens tests — confirm no failing check is being hidden (see CONTRIBUTING.md)"
+}
+
+review_tier := "elevated" {
+    ai_weakens_tests
+}
+
 # STRICT (opt-in): require tests for AI-authored source. Deterministic, so it
 # may deny — but only for changes the author attested; a suspected change
 # gets the nudge above instead.
@@ -141,6 +165,24 @@ warn[msg] {
 
 review_tier := "elevated" {
     ai_touches_sensitive_path
+}
+
+# The description is part of what the author owns. A claim the diff does not
+# bear out (tests added, docs updated, fixes an issue) is worth a question.
+ai_unverified_claim {
+    input.ai_generated
+    input.merge_confidence.claims[_].verified == false
+}
+
+warn[msg] {
+    input.ai_generated
+    c := input.merge_confidence.claims[_]
+    c.verified == false
+    msg = sprintf("AI-assisted change: the description claims %s, but the diff does not show it (%s)", [c.claim, c.evidence])
+}
+
+review_tier := "elevated" {
+    ai_unverified_claim
 }
 
 # An AI reviewer's request_changes (fed in with --ai-review) only tightens
@@ -175,6 +217,8 @@ review_tier := "auto" {
     not ai_undisclosed
     not ai_untested
     not ai_low_patch_coverage
+    not ai_weakens_tests
     not ai_touches_sensitive_path
+    not ai_unverified_claim
     not ai_review_requests_changes
 }

@@ -78,6 +78,10 @@ The trailers other tools and projects write count the same way: Cursor's `Made-w
 
 Repos using [git-ai](https://github.com/git-ai-project/git-ai) get the highest-fidelity signal: its authorship logs under `refs/notes/ai` (Git AI Standard v3) record **which lines** each agent wrote. When notes are present on commits in the diff range, per-file AI line counts are *measured* from them instead of estimated by the diff heuristics, and the evidence names the agent and model (`AI-assisted commit a1b2c3d (git-ai: 6 AI line(s), cursor/claude-sonnet-4-5)`). AI lines are capped at each file's changed lines so authorship recorded outside the change can't inflate the ratio. Nothing changes on repos without git-ai. Note for CI: git notes aren't fetched by default — run `git fetch origin +refs/notes/ai:refs/notes/ai` after checkout.
 
+Repos whose agents write [Agent Trace](https://agent-trace.dev) records get the same measured signal from an open, vendor-neutral format. ODS reads the reference implementation's sidecar layout, JSON Lines files under `.agent-trace/` at the repository root (`*.json` files holding one record or an array also work), and counts a record when its `vcs.revision` names a commit in the diff range. Ranges whose contributor is `ai` or `mixed` (a human edit of AI output) count as AI-assisted lines; overlapping ranges count once, and the count is capped at each file's changed lines as with git-ai. The source is `agent-trace`, its evidence tier is `corroborated`, and `ai_code_ratio_source` becomes `agent-trace`. When both git-ai notes and traces cover a change, git-ai's counts are used. The traces have to be in the checkout CI runs on, so commit `.agent-trace/` if the gate should see them.
+
+Some projects keep AI attribution out of git history on purpose. Kubernetes, for example, asks for a sentence in the PR description and does not accept AI trailers. For them the PR description is the signal. ODS reads it line by line: a ticked disclosure checkbox, a sentence such as "written in part with the assistance of generative AI" or "with the help of AI", a filled-in `AI Tool:` field, or a tool's own footer ("Generated with Claude Code"). An unticked checkbox, an empty template field, an HTML comment, a quoted line, or a line that negates the statement ("no AI-generated code") discloses nothing. `ods report` reads history, so in those projects it sees only what the trailers record.
+
 This is attribution from signals the tools (or authors) volunteer, not forensic detection: stripping the trailer evades it, and the diff heuristics are only a low-confidence fallback. The aggregate confidence is the strongest signal plus 5% per additional independent source — five attributed commits are one source, not five — and it is capped at 95%: ODS never reports certainty about authorship.
 
 `ods detect` exits 0 whenever detection ran, whether or not AI was found; a non-zero exit means detection itself failed (for example, no git history to read). Deciding what a positive detection means for the merge is the policy's job: gate with `ods check`.
@@ -207,7 +211,8 @@ separate on purpose: a +0.1 delta is an increase and low risk.
 
 `ai_code_ratio` is AI lines over the change's added *code* lines, and
 `ai_code_ratio_source` says where the numerator comes from: `git-ai`
-(measured from authorship notes), `commit-trailer` (the code lines each
+(measured from authorship notes), `agent-trace` (measured from Agent Trace
+records), `commit-trailer` (the code lines each
 AI-attributed commit added, capped at what the change still contains),
 `diff-heuristics` (estimated), or `unknown` — no per-file attribution exists,
 so the ratio is 0 and nothing is claimed rather than a number invented from
@@ -284,8 +289,8 @@ The [SFC guidance](https://sfconservancy.org/) and the
 one duty: **the author discloses AI involvement** (what tool, what model, how
 it participated) — it's not the maintainer's job to guess. ODS makes that norm
 checkable at the gate. The policy input carries `detection_sources` — which
-signals fired (`commit-trailer`, `git-ai-notes`, `pr-body`, `branch-name`,
-`diff-heuristics`) — so a policy can separate *disclosed* AI use from merely
+signals fired (`commit-trailer`, `git-ai-notes`, `agent-trace`, `pr-body`,
+`branch-name`, `diff-heuristics`) — so a policy can separate *disclosed* AI use from merely
 *suspected* AI use. `ods check`, `ods score` and `ods attest` read the PR
 description from `ODS_PR_BODY` and the branch from `ODS_BRANCH` /
 `GITHUB_HEAD_REF` / the checkout, exactly as `ods detect` does, so a ticked
@@ -294,6 +299,7 @@ disclosure box counts at the gate:
 ```rego
 ai_disclosed { input.detection_sources[_] == "commit-trailer" }
 ai_disclosed { input.detection_sources[_] == "git-ai-notes" }
+ai_disclosed { input.detection_sources[_] == "agent-trace" }
 ai_disclosed { input.detection_sources[_] == "pr-body" }
 
 # Suspected AI without any author attribution → ask for it (never block)
@@ -318,7 +324,7 @@ level, not forensic proof of authorship:
 
 | Tier | Evidence | From |
 |------|----------|------|
-| `corroborated` | independently **measured** | `git-ai-notes` |
+| `corroborated` | independently **measured** | `git-ai-notes`, `agent-trace` |
 | `attested` | author/tool **declared** it | `commit-trailer`, `pr-body` |
 | `inferred` | **heuristic** only | `branch-name`, `diff-heuristics` |
 
@@ -353,6 +359,9 @@ LLM, no stylometric guessing. The policy input carries `merge_confidence`:
 | `tests_touched` | Any test file was added or modified |
 | `risky_paths` | Changed files on sensitive paths — CI config (`.github/workflows/`), dependency manifests/lockfiles, `auth`/`crypto`/`security` paths |
 | `files_changed` / `net_added_lines` / `source_files_changed` / `test_files_changed` | Diff shape, for wide-but-shallow detection |
+| `claims` | What the PR description says the change does, each checked against the diff (below) |
+| `tests_weakened` / `test_weakening` | The change deletes a test file, adds a test skip, or removes more assertions than it adds (below) |
+| `suppressions_added` | Added lines that silence a linter or type checker (`nolint`, `type: ignore`, `@ts-ignore`, `eslint-disable`, `@SuppressWarnings`, …) |
 
 They are **facts, not opinions**: advisory by default (they route review
 attention), and attribution is used to *raise the bar* — an AI-authored change
@@ -373,6 +382,51 @@ deny[msg] {
     msg = "AI-authored change adds source without tests"
 }
 ```
+
+**Claims.** A pull request description makes claims a reviewer takes on
+trust: tests were added, the docs were updated, it fixes an issue. `claims`
+checks the ones the diff can confirm, from structured phrasing only: ticked
+checkboxes, GitHub closing keywords (`Fixes #12`), and short sentences such as
+"added unit tests". Unticked boxes, HTML comments, quoted lines, fenced code
+and negated sentences ("no tests added") claim nothing, so an unfilled template
+is silent.
+
+| `claim` | Verified when |
+|---------|---------------|
+| `tests-added` | a test file is added or modified |
+| `docs-updated` | a documentation file (Markdown, reST, AsciiDoc, `docs/`, README, CHANGELOG) is added or modified |
+| `fixes-issue` | a file other than a test is added or modified; a "fix" that only edits tests fixes the check, not the code |
+
+Each entry carries the line that made the claim and the evidence
+(`"no test file was added or modified"`). A verified `tests-added` means a test
+file changed, not that the tests are good; `test_weakening` and the coverage
+signals say more.
+
+```json
+"claims": [
+  {"claim": "fixes-issue", "text": "Fixes #12", "verified": true, "evidence": "1 non-test file changed: calc/calc.go"},
+  {"claim": "docs-updated", "text": "- [x] Documentation updated", "verified": false, "evidence": "no documentation file was added or modified"}
+]
+```
+
+**Test weakening.** A suite can go green because a check went away:
+maintainers report agent-authored changes that delete a test, skip it, or
+loosen its assertions until it passes. `test_weakening` counts these in test
+files: `deleted_test_files`, `skips_added` (`t.Skip`, `@pytest.mark.skip`,
+`it.skip`, `xit`, `@Disabled`, `#[ignore]`, …), and `assertions_removed` /
+`assertions_added` (assert, expect, require, `t.Error`, `t.Fatal`, …).
+`tests_weakened` is true when a test file is deleted, a skip is added to a
+test file that already existed, or more assertion lines are removed than
+added. Renames are detected, so moving a test file is not deleting it. Markers
+inside string literals, such as a test fixture that spells `t.Skip(`, are
+ignored. Each pattern has legitimate uses, such as dropping a
+removed feature's tests or quarantining a flaky one, which is why these route
+review instead of judging.
+
+The default policy warns on an unverified claim and on each weakening pattern
+for any change, routes AI-authored ones to `elevated`, and keeps all of them
+out of `auto`. AI-authored suppressions warn and keep the change out of `auto`
+without elevating it. None of them deny unless your policy opts in.
 
 This is the achievable form of "is this PR safe to merge?": ODS proves the
 change is tested, scanned, and shaped like real work — it does not judge whether

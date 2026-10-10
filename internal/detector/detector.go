@@ -15,6 +15,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/open-delivery-spec/cli/internal/agenttrace"
 	"github.com/open-delivery-spec/cli/internal/gitai"
 )
 
@@ -101,6 +102,27 @@ func Detect(opts Options) (*DetectionResult, error) {
 		result.Sources = append(result.Sources, "git-ai-notes")
 	}
 
+	// Source 1.6: Agent Trace records (.agent-trace/*.jsonl) — the open,
+	// vendor-neutral line-level attribution format. Measured like git-ai, and
+	// read the same way: one evidence row per commit a trace covers.
+	traceAttr, _ := agenttrace.ReadRange(opts.DiffBase, opts.MaxCommits)
+	if traceAttr != nil {
+		for _, c := range traceAttr.Commits {
+			value := fmt.Sprintf("AI-assisted commit %s (agent-trace: %d AI line(s)", c.Hash, c.AILines)
+			if len(c.Agents) > 0 {
+				value += ", " + strings.Join(c.Agents, ", ")
+			}
+			value += ")"
+			result.Evidence = append(result.Evidence, Evidence{
+				Source:     "agent-trace",
+				Signal:     "trace-record",
+				Value:      value,
+				Confidence: 0.95,
+			})
+		}
+		result.Sources = append(result.Sources, "agent-trace")
+	}
+
 	// Source 2: Branch name prefix (ai-, claude/, copilot/, etc.)
 	if opts.BranchName != "" {
 		if ev := detectFromBranch(opts.BranchName); ev != nil {
@@ -119,14 +141,16 @@ func Detect(opts Options) (*DetectionResult, error) {
 
 	// Source 4: per-file AI line counts, strongest provenance first — never
 	// mix a measurement with a guess for the same quantity:
-	//   1. git-ai's measured authorship;
+	//   1. measured authorship: git-ai notes, then Agent Trace records;
 	//   2. the lines AI-attributed commits added (attested by the trailer);
 	//   3. the statistical diff heuristics, only when nothing attests the
 	//      change — running them next to a trailer would let them attribute
 	//      the human commits of a mixed change to AI.
 	switch {
 	case gitaiAttr != nil && len(gitaiAttr.Files) > 0:
-		result.Files = filesFromGitAI(gitaiAttr, opts.DiffBase)
+		result.Files = filesFromMeasured(gitaiAttr.Files, opts.DiffBase)
+	case traceAttr != nil && len(traceAttr.Files) > 0:
+		result.Files = filesFromMeasured(traceAttr.Files, opts.DiffBase)
 	case len(aiCommits) > 0:
 		result.Files = filesFromCommits(aiCommits, opts.DiffBase)
 	default:
@@ -465,16 +489,17 @@ func filesFromCommits(hashes []string, base string) []FileDetection {
 	return files
 }
 
-// filesFromGitAI converts git-ai's measured per-file AI line counts into
-// FileDetections. TotalLines comes from the diff's insertions per file (same
-// range as the rest of detection); AI lines are capped at the insertions so
-// authorship recorded on lines outside this change cannot inflate the ratio.
-// Files absent from the diff are skipped for the same reason.
-func filesFromGitAI(attr *gitai.RangeAttribution, base string) []FileDetection {
+// filesFromMeasured converts measured per-file AI line counts (git-ai notes
+// or Agent Trace records) into FileDetections. TotalLines comes from the
+// diff's insertions per file (same range as the rest of detection); AI lines
+// are capped at the insertions so authorship recorded on lines outside this
+// change cannot inflate the ratio. Files absent from the diff are skipped for
+// the same reason.
+func filesFromMeasured(measured map[string]int, base string) []FileDetection {
 	insertions := rangeInsertions(base)
 
-	paths := make([]string, 0, len(attr.Files))
-	for p := range attr.Files {
+	paths := make([]string, 0, len(measured))
+	for p := range measured {
 		paths = append(paths, p)
 	}
 	sort.Strings(paths)
@@ -485,7 +510,7 @@ func filesFromGitAI(attr *gitai.RangeAttribution, base string) []FileDetection {
 		if !changed || total == 0 {
 			continue
 		}
-		ai := attr.Files[path]
+		ai := measured[path]
 		if ai > total {
 			ai = total
 		}
@@ -694,12 +719,29 @@ func detectFromBranch(branchName string) *Evidence {
 }
 
 // detectFromPRBody checks the PR description for AI disclosure.
+//
+// It reads the description line by line: HTML comments (template hints) are
+// dropped, an unticked checkbox discloses nothing, and a disclosure phrase on
+// a line that negates it ("no AI-generated code") does not count. Projects
+// that keep AI attribution out of git history, such as Kubernetes, which asks
+// for a sentence in the PR description instead of a trailer, rely on this
+// source alone.
 func detectFromPRBody(body string) *Evidence {
 	if body == "" {
 		return nil
 	}
 
-	lower := strings.ToLower(body)
+	var lines []string
+	for _, raw := range strings.Split(prHTMLComment.ReplaceAllString(body, ""), "\n") {
+		line := strings.ToLower(strings.TrimSpace(raw))
+		if line == "" || strings.HasPrefix(line, ">") {
+			continue
+		}
+		if m := prCheckbox.FindStringSubmatch(line); m != nil && m[1] == " " {
+			continue // unticked: the template asked, the author did not answer yes
+		}
+		lines = append(lines, line)
+	}
 
 	// Pattern 1: AI Disclosure checkbox ticked
 	aiCheckboxPatterns := []string{
@@ -711,39 +753,55 @@ func detectFromPRBody(body string) *Evidence {
 		"[x] ai-assisted",
 		"- [x] this pr contains ai",
 	}
-	for _, pattern := range aiCheckboxPatterns {
-		if strings.Contains(lower, pattern) {
-			return &Evidence{
-				Source:     "pr-body",
-				Signal:     "ai-disclosure-checkbox",
-				Value:      "AI disclosure checkbox is checked",
-				Confidence: 0.85,
+	for _, line := range lines {
+		for _, pattern := range aiCheckboxPatterns {
+			if strings.Contains(line, pattern) {
+				return &Evidence{
+					Source:     "pr-body",
+					Signal:     "ai-disclosure-checkbox",
+					Value:      "AI disclosure checkbox is checked",
+					Confidence: 0.85,
+				}
 			}
 		}
 	}
 
-	// Pattern 2: AI Disclosure section with explicit statement
-	aiDisclosureStatements := []string{
-		"ai-generated code",
-		"ai generated code",
-		"ai-assisted code",
-		"ai tool:",
-		"**ai tool:**",
-		"ai-tool:",
-	}
-	for _, stmt := range aiDisclosureStatements {
-		if strings.Contains(lower, stmt) {
-			return &Evidence{
-				Source:     "pr-body",
-				Signal:     "ai-disclosure-text",
-				Value:      fmt.Sprintf("AI disclosure text found: '%s'", stmt),
-				Confidence: 0.8,
+	// Pattern 2: an explicit disclosure statement, or a tool's own footer
+	// ("Generated with [Claude Code](…)").
+	for _, line := range lines {
+		if prNegation.MatchString(line) {
+			continue
+		}
+		for _, re := range prDisclosureStatements {
+			if m := re.FindString(line); m != "" {
+				return &Evidence{
+					Source:     "pr-body",
+					Signal:     "ai-disclosure-text",
+					Value:      fmt.Sprintf("AI disclosure text found: '%s'", strings.TrimSpace(m)),
+					Confidence: 0.8,
+				}
 			}
 		}
 	}
 
 	return nil
 }
+
+var (
+	prHTMLComment = regexp.MustCompile(`(?s)<!--.*?-->`)
+	prCheckbox    = regexp.MustCompile(`^[-*+]\s+\[([ x])\]`)
+	prNegation    = regexp.MustCompile(`(\bno\b|\bnot\b|n't\b|\bwithout\b|\bnever\b|\bnone\b)`)
+	// prDisclosureStatements match lower-cased lines. "ai tool:" needs a value
+	// after the colon: an unfilled template field discloses nothing.
+	prDisclosureStatements = []*regexp.Regexp{
+		regexp.MustCompile(`ai[- ]generated code`),
+		regexp.MustCompile(`ai-assisted code`),
+		regexp.MustCompile(`(\*\*)?ai[- ]tool:(\*\*)?\s*[a-z0-9]`),
+		regexp.MustCompile(`with the (assistance|help) of (generative )?ai\b`),
+		regexp.MustCompile(`with (generative )?ai assistance\b`),
+		regexp.MustCompile(`generated (with|by) \[?(claude code|claude|github copilot|copilot|cursor|codex|gemini cli|gemini|aider|devin|windsurf|amp|cline|opencode|jules)\b`),
+	}
+)
 
 // detectFromDiff analyzes git diff output for AI code fingerprint patterns.
 func detectFromDiff(base string) ([]FileDetection, []Evidence) {
@@ -1045,7 +1103,7 @@ func nonEmptyLines(s string) []string {
 // authorship. Ordered corroborated > attested > inferred; returns "" when no
 // attribution source is present (the caller omits the field).
 //
-//	corroborated  git-ai-notes                  (independently measured lines)
+//	corroborated  git-ai-notes, agent-trace     (independently measured lines)
 //	attested      commit-trailer, pr-body       (author/tool declared it)
 //	inferred      branch-name, diff-heuristics   (heuristic only)
 func EvidenceTier(sources []string) string {
@@ -1058,7 +1116,7 @@ func EvidenceTier(sources []string) string {
 	}
 	for _, s := range sources {
 		switch s {
-		case "git-ai-notes":
+		case "git-ai-notes", "agent-trace":
 			bump("corroborated")
 		case "commit-trailer", "pr-body":
 			bump("attested")

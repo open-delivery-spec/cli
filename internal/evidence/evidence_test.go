@@ -133,10 +133,11 @@ func TestBuild_ValidatesAgainstOfficialSchema(t *testing.T) {
 		}
 		det := &detector.DetectionResult{
 			AIGenerated: true, Confidence: 0.3,
-			Sources: []string{"diff-heuristics", "git-ai-notes", "pr-body", "a-future-source"},
+			Sources: []string{"diff-heuristics", "git-ai-notes", "agent-trace", "pr-body", "a-future-source"},
 			Evidence: []detector.Evidence{
 				{Source: "diff-heuristics", Signal: "uniform style", Confidence: 0.3},
 				{Source: "git-ai-notes", Signal: "3 lines attributed", Confidence: 1},
+				{Source: "agent-trace", Signal: "trace-record", Confidence: 0.95},
 				{Source: "pr-body", Signal: "AI-assisted: yes", Confidence: 0.7},
 				{Source: "a-future-source", Signal: "?", Confidence: 0.1},
 			},
@@ -292,6 +293,7 @@ func TestTechniqueFor(t *testing.T) {
 		"commit-trailer":  "attestation",
 		"pr-body":         "attestation",
 		"git-ai-notes":    "source-code-analysis",
+		"agent-trace":     "source-code-analysis",
 		"branch-name":     "filename",
 		"diff-heuristics": "other",
 		"a-future-source": "other",
