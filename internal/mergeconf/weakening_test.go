@@ -54,6 +54,19 @@ func TestComputeTestWeakening(t *testing.T) {
 			TestWeakening{}, false,
 		},
 		{
+			"a skip in a test file the change creates is not weakening",
+			[]FileChange{{Path: "pkg/new_test.go", Created: true,
+				Added: []string{`	t.Skip("needs a database")`, `	assert.Equal(t, 1, x)`}}},
+			TestWeakening{AssertionsAdded: 1}, false,
+		},
+		{
+			"markers inside string literals are data, not code",
+			[]FileChange{{Path: "detector_test.go",
+				Added:   []string{"	{Added: []string{`t.Skip(\"flaky\")`}},", `	want := "@pytest.mark.skip"`, `	name := 'it.skip('`},
+				Removed: []string{`	msg := "assert.Equal(t, 1, x) failed"`}}},
+			TestWeakening{}, false,
+		},
+		{
 			"jest expectations and RSpec matchers count",
 			[]FileChange{
 				{Path: "src/x.spec.ts", Removed: []string{`expect(sum(1, 2)).toBe(3)`}},
@@ -93,6 +106,7 @@ func TestCountSuppressionsAdded(t *testing.T) {
 		{Path: "D.java", Added: []string{`@SuppressWarnings("unchecked")`}},
 		{Path: "e.rs", Added: []string{`#[allow(dead_code)]`}},
 		{Path: "f.rb", Added: []string{`# rubocop:disable Metrics/AbcSize`}},
+		{Path: "g_test.go", Added: []string{`	hint := "add // nolint to silence it"`, "	{Added: []string{`# type: ignore`}},"}},
 	}
 	if got, want := CountSuppressionsAdded(changes), 10; got != want {
 		t.Errorf("CountSuppressionsAdded = %d, want %d", got, want)

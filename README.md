@@ -415,9 +415,11 @@ loosen its assertions until it passes. `test_weakening` counts these in test
 files: `deleted_test_files`, `skips_added` (`t.Skip`, `@pytest.mark.skip`,
 `it.skip`, `xit`, `@Disabled`, `#[ignore]`, …), and `assertions_removed` /
 `assertions_added` (assert, expect, require, `t.Error`, `t.Fatal`, …).
-`tests_weakened` is true when a test file is deleted, a skip is added, or more
-assertion lines are removed than added. Renames are detected, so moving a test
-file is not deleting it. Each pattern has legitimate uses, such as dropping a
+`tests_weakened` is true when a test file is deleted, a skip is added to a
+test file that already existed, or more assertion lines are removed than
+added. Renames are detected, so moving a test file is not deleting it. Markers
+inside string literals, such as a test fixture that spells `t.Skip(`, are
+ignored. Each pattern has legitimate uses, such as dropping a
 removed feature's tests or quarantining a flaky one, which is why these route
 review instead of judging.
 

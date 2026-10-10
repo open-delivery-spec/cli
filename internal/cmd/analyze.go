@@ -384,7 +384,8 @@ func getDiffFileChanges(base string) ([]mergeconf.FileChange, error) {
 
 // parseFileChanges splits a multi-file unified diff into per-file changes,
 // keeping code files only. The path comes from the ---/+++ headers; a deleted
-// file has "+++ /dev/null" and keeps its old path.
+// file has "+++ /dev/null" and keeps its old path, a created one has
+// "--- /dev/null".
 func parseFileChanges(diff []byte) []mergeconf.FileChange {
 	var changes []mergeconf.FileChange
 	var cur *mergeconf.FileChange
@@ -407,7 +408,7 @@ func parseFileChanges(diff []byte) []mergeconf.FileChange {
 			if p := diffHeaderPath(line[4:], "b/"); p == "/dev/null" {
 				cur.Deleted, cur.Path = true, oldPath
 			} else {
-				cur.Path = p
+				cur.Path, cur.Created = p, oldPath == "/dev/null"
 			}
 		case strings.HasPrefix(line, "@@"):
 			inHunk = true

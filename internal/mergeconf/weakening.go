@@ -12,6 +12,9 @@ type FileChange struct {
 	Path    string
 	Added   []string
 	Removed []string
+	// Created is true when the change adds the file: it did not exist at the
+	// base.
+	Created bool
 	// Deleted is true when the change removes the file.
 	Deleted bool
 }
@@ -94,9 +97,26 @@ func anyOf(alts ...string) string {
 	return "(?:" + strings.Join(alts, ")|(?:") + ")"
 }
 
+// stringLiteral matches a double-quoted, single-quoted or backtick string on
+// one line, escapes included.
+var stringLiteral = regexp.MustCompile(`"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|` + "`[^`]*`")
+
+// codeOnly empties the string literals on a line, so a marker that is data —
+// a fixture spelling t.Skip(, a message quoting a noqa comment — is not read
+// as code. The quotes stay, so skip "reason" still reads as a skip. Strings
+// that span lines are not tracked.
+func codeOnly(line string) string {
+	return stringLiteral.ReplaceAllStringFunc(line, func(s string) string {
+		return s[:1] + s[len(s)-1:]
+	})
+}
+
 // ComputeTestWeakening derives the test-weakening facts from the changed code
 // files. Assertions and skips are counted in test files only; a deleted test
 // file is listed, and its lines are not counted again as removed assertions.
+// Skips count only in test files that existed before the change: weakening is
+// about the checks the base already ran, and a test skipped from the moment it
+// is written hides none of them.
 func ComputeTestWeakening(changes []FileChange) TestWeakening {
 	var w TestWeakening
 	for _, c := range changes {
@@ -108,7 +128,8 @@ func ComputeTestWeakening(changes []FileChange) TestWeakening {
 			continue
 		}
 		for _, l := range c.Added {
-			if skipMarkers.MatchString(l) {
+			l = codeOnly(l)
+			if !c.Created && skipMarkers.MatchString(l) {
 				w.SkipsAdded++
 			}
 			if assertionMarkers.MatchString(l) {
@@ -116,7 +137,7 @@ func ComputeTestWeakening(changes []FileChange) TestWeakening {
 			}
 		}
 		for _, l := range c.Removed {
-			if assertionMarkers.MatchString(l) {
+			if assertionMarkers.MatchString(codeOnly(l)) {
 				w.AssertionsRemoved++
 			}
 		}
@@ -132,7 +153,7 @@ func CountSuppressionsAdded(changes []FileChange) int {
 	n := 0
 	for _, c := range changes {
 		for _, l := range c.Added {
-			if suppressionMarkers.MatchString(l) {
+			if suppressionMarkers.MatchString(codeOnly(l)) {
 				n++
 			}
 		}
